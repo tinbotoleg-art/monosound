@@ -1,0 +1,6 @@
+{
+  "name": "Музыкальный Плеер",
+  "description": "Минималистичный черно-белый музыкальный плеер с плейлистами, офлайн-режимом и AI-рекомендациями.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

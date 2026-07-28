@@ -1,0 +1,514 @@
+import React, { useState } from 'react';
+import { 
+  Upload, 
+  Coins, 
+  Music, 
+  DollarSign, 
+  TrendingUp, 
+  Check, 
+  Play, 
+  Sparkles, 
+  CreditCard, 
+  X, 
+  AlertCircle,
+  Volume2
+} from 'lucide-react';
+import { Track, Genre, User } from '../types';
+
+interface EarnViewProps {
+  currentUser: User | null;
+  uploadedTracks: Track[];
+  onUploadTrack: (newTrack: Omit<Track, 'id' | 'playCount'>) => void;
+  onOpenAuth: () => void;
+  onPlayTrack: (track: Track) => void;
+  currentTrack: Track | null;
+  isPlaying: boolean;
+}
+
+const GENRES: Genre[] = [
+  'Ambient',
+  'Minimal Techno',
+  'Lo-Fi',
+  'Synthwave',
+  'Classical Piano',
+  'Post-Rock',
+  'Jazz Noir',
+  'Deep House'
+];
+
+export const EarnView: React.FC<EarnViewProps> = ({
+  currentUser,
+  uploadedTracks,
+  onUploadTrack,
+  onOpenAuth,
+  onPlayTrack,
+  currentTrack,
+  isPlaying,
+}) => {
+  // Form state
+  const [title, setTitle] = useState('');
+  const [artist, setArtist] = useState(currentUser?.name || '');
+  const [album, setAlbum] = useState('Сингл');
+  const [genre, setGenre] = useState<Genre>('Ambient');
+  const [year, setYear] = useState(2026);
+  const [synthStyle, setSynthStyle] = useState<'ambient_pad' | 'lofi_chill' | 'synthwave_pulse' | 'piano_solo' | 'minimal_beat' | 'jazz_chords'>('lofi_chill');
+  const [coverUrl, setCoverUrl] = useState('');
+  const [uploadedAudioFileName, setUploadedAudioFileName] = useState('');
+  const [audioUrl, setAudioUrl] = useState('');
+  const [isSuccessMessage, setIsSuccessMessage] = useState(false);
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  const [withdrawCard, setWithdrawCard] = useState('');
+  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
+
+  // Filter user's tracks
+  const myTracks = uploadedTracks.filter(
+    t => t.uploadedBy === currentUser?.email || t.uploadedBy === currentUser?.id
+  );
+
+  const totalPlaysOnMyTracks = myTracks.reduce((acc, t) => acc + (t.playCount || 0), 0);
+  const calculatedEarnings = (totalPlaysOnMyTracks * 0.10) + (currentUser?.artistEarnings || 0);
+
+  const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploadedAudioFileName(file.name);
+      // Create local object URL for preview/playback
+      const url = URL.createObjectURL(file);
+      setAudioUrl(url);
+    }
+  };
+
+  const handleCoverFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setCoverUrl(url);
+    }
+  };
+
+  const handleSubmitTrack = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !artist.trim()) return;
+
+    const defaultCovers = [
+      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&q=80',
+      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80',
+      'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80',
+      'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&q=80'
+    ];
+
+    const randomCover = defaultCovers[Math.floor(Math.random() * defaultCovers.length)];
+
+    onUploadTrack({
+      title,
+      artist,
+      album: album || 'Сингл',
+      genre,
+      year,
+      duration: 180 + Math.floor(Math.random() * 60),
+      coverUrl: coverUrl || randomCover,
+      audioUrl: audioUrl || undefined,
+      audioPattern: !audioUrl ? {
+        tempo: 80 + Math.floor(Math.random() * 40),
+        key: 'C minor',
+        synthStyle,
+        notes: [60, 63, 67, 70, 72, 67, 63, 60]
+      } : undefined,
+      uploadedBy: currentUser?.email || currentUser?.id || 'guest',
+      earningsCount: 0,
+      moderationStatus: 'pending',
+    });
+
+    setIsSuccessMessage(true);
+    setTitle('');
+    setUploadedAudioFileName('');
+    setAudioUrl('');
+    setCoverUrl('');
+    setTimeout(() => setIsSuccessMessage(false), 4000);
+  };
+
+  const handleWithdrawSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!withdrawCard) return;
+    setWithdrawSuccess(true);
+    setTimeout(() => {
+      setWithdrawSuccess(false);
+      setIsWithdrawModalOpen(false);
+      setWithdrawCard('');
+    }, 2500);
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Monetization Header Banner */}
+      <div className="p-8 bg-zinc-950 border border-zinc-800 rounded-2xl relative overflow-hidden">
+        <div className="relative z-10 max-w-3xl space-y-4">
+          <div className="inline-flex items-center space-x-2 px-3 py-1 bg-zinc-900 border border-zinc-800 rounded-full text-xs font-mono text-zinc-300">
+            <Coins className="w-4 h-4 text-white" />
+            <span>Платформа Монетизации Авторов</span>
+          </div>
+          <h2 className="text-3xl font-extrabold tracking-tight text-white">
+            Зарабатывайте на своей музыке
+          </h2>
+          <p className="text-xs text-zinc-400 leading-relaxed max-w-2xl">
+            MonoSound работает по прозрачной модели распределения доходов: пользователи оплачивают подписку <strong className="text-white">59 ₽ в месяц</strong>. Каждое прослушивание вашего трека подписчиками приносит прямые финансовые отчисления в ваш авторский кабинет.
+          </p>
+
+          {/* Quick Stats Dashboard */}
+          <div className="pt-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-1">
+              <span className="text-[10px] font-mono uppercase text-zinc-500">Баланс к выплате</span>
+              <div className="flex items-baseline justify-between">
+                <p className="text-xl font-extrabold text-white">{calculatedEarnings.toFixed(2)} ₽</p>
+                {calculatedEarnings > 0 && (
+                  <button
+                    onClick={() => setIsWithdrawModalOpen(true)}
+                    className="text-[11px] font-semibold text-white hover:underline"
+                  >
+                    Вывести
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-1">
+              <span className="text-[10px] font-mono uppercase text-zinc-500">Ваших треков</span>
+              <p className="text-xl font-extrabold text-white">{myTracks.length}</p>
+            </div>
+
+            <div className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-1">
+              <span className="text-[10px] font-mono uppercase text-zinc-500">Всего прослушиваний</span>
+              <p className="text-xl font-extrabold text-white">{totalPlaysOnMyTracks}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {!currentUser && (
+        <div className="p-4 bg-zinc-900/80 border border-zinc-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <AlertCircle className="w-5 h-5 text-white shrink-0" />
+            <p className="text-xs text-zinc-300">
+              Чтобы привязать загруженные треки к вашему профилю и получать выплаты, авторизуйтесь в системе.
+            </p>
+          </div>
+          <button
+            onClick={onOpenAuth}
+            className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-lg shrink-0 transition-colors"
+          >
+            Войти в аккаунт
+          </button>
+        </div>
+      )}
+
+      {/* Main Grid: Upload Form & Royalty Breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Track Upload Form (2 cols) */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-xl space-y-6">
+            <div className="border-b border-zinc-800 pb-4">
+              <h3 className="text-lg font-bold text-white tracking-tight flex items-center space-x-2">
+                <Upload className="w-5 h-5 text-white" />
+                <span>Загрузка нового релиз-трека</span>
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                Заполните карточку релиза. Ваш трек будет отправлен на проверку модератору перед публикацией.
+              </p>
+            </div>
+
+            {isSuccessMessage && (
+              <div className="p-4 bg-amber-950/50 border border-amber-800 text-amber-200 text-xs rounded-lg flex items-center space-x-3">
+                <Check className="w-5 h-5 text-amber-400 shrink-0" />
+                <span>Ваш трек успешно отправлен на модерацию! Модератор проверит его в ближайшее время.</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitTrack} className="space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase">Название трека *</label>
+                  <input
+                    type="text"
+                    required
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Например: Midnight Resonance"
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-zinc-600"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase">Исполнитель / Проект *</label>
+                  <input
+                    type="text"
+                    required
+                    value={artist}
+                    onChange={(e) => setArtist(e.target.value)}
+                    placeholder="Ваш псевдоним"
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-zinc-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase">Альбом / Релиз</label>
+                  <input
+                    type="text"
+                    value={album}
+                    onChange={(e) => setAlbum(e.target.value)}
+                    placeholder="Single / EP"
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-zinc-600"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase">Жанр</label>
+                  <select
+                    value={genre}
+                    onChange={(e) => setGenre(e.target.value as Genre)}
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-zinc-600"
+                  >
+                    {GENRES.map((g) => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase">Год записи</label>
+                  <input
+                    type="number"
+                    value={year}
+                    onChange={(e) => setYear(Number(e.target.value))}
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-zinc-600"
+                  />
+                </div>
+              </div>
+
+              {/* Audio Source Option */}
+              <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-3">
+                <label className="text-[11px] font-mono text-zinc-400 uppercase block">
+                  Аудиофайл трека
+                </label>
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <label className="cursor-pointer inline-flex items-center space-x-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-semibold rounded-lg transition-colors border border-zinc-700">
+                    <Volume2 className="w-4 h-4" />
+                    <span>{uploadedAudioFileName ? 'Сменить файл' : 'Загрузить mp3/wav'}</span>
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      onChange={handleAudioFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                  <span className="text-xs text-zinc-400 truncate">
+                    {uploadedAudioFileName ? `Выбран: ${uploadedAudioFileName}` : 'или будет сгенерирован аудио-паттерн'}
+                  </span>
+                </div>
+
+                {!uploadedAudioFileName && (
+                  <div className="pt-2">
+                    <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">
+                      Аудио-синтез (если файл не выбран)
+                    </label>
+                    <select
+                      value={synthStyle}
+                      onChange={(e) => setSynthStyle(e.target.value as any)}
+                      className="w-full bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs rounded-lg px-3 py-2"
+                    >
+                      <option value="lofi_chill">Lo-Fi Chill Synthesizer</option>
+                      <option value="ambient_pad">Ambient Warm Pad</option>
+                      <option value="synthwave_pulse">Synthwave Bassline</option>
+                      <option value="piano_solo">Solo Piano Harmony</option>
+                      <option value="minimal_beat">Minimal Techno Rhythm</option>
+                      <option value="jazz_chords">Noir Jazz Chords</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Cover Art Upload / Option */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-mono text-zinc-400 uppercase">Обложка релиза</label>
+                <div className="flex items-center space-x-3">
+                  <label className="cursor-pointer px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs rounded-lg font-medium transition-colors">
+                    <span>Выбрать обложку из файла</span>
+                    <input type="file" accept="image/*" onChange={handleCoverFileChange} className="hidden" />
+                  </label>
+                  {coverUrl && (
+                    <img src={coverUrl} alt="Preview" className="w-10 h-10 rounded-lg object-cover border border-zinc-700" />
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3.5 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors shadow-md flex items-center justify-center space-x-2"
+              >
+                <Sparkles className="w-4 h-4 fill-black" />
+                <span>Опубликовать трек и начать монетизацию</span>
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Sidebar Info & Earnings Rules (1 col) */}
+        <div className="space-y-6">
+          <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-xl space-y-4">
+            <h3 className="text-base font-bold text-white tracking-tight flex items-center space-x-2">
+              <TrendingUp className="w-4 h-4 text-white" />
+              <span>Как рассчитывается заработок</span>
+            </h3>
+
+            <div className="space-y-3 text-xs text-zinc-400">
+              <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg space-y-1">
+                <p className="text-white font-semibold">1. Фонд подписок 59 ₽/мес</p>
+                <p className="text-[11px]">
+                  Каждый подписчик формирует общий призовой пул платформы.
+                </p>
+              </div>
+
+              <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg space-y-1">
+                <p className="text-white font-semibold">2. Прямые выплаты за прослушивание</p>
+                <p className="text-[11px]">
+                  За каждый прослушанный трек вам начисляется ставка 10 копеек (0,10 ₽ за стрим).
+                </p>
+              </div>
+
+              <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg space-y-1">
+                <p className="text-white font-semibold">3. Мгновенный вывод средств</p>
+                <p className="text-[11px]">
+                  Выводите накопленные роялти на любую банковскую карту или по СБП в любое время.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* User's Uploaded Tracks List */}
+          <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-xl space-y-4">
+            <h3 className="text-base font-bold text-white tracking-tight flex items-center space-x-2">
+              <Music className="w-4 h-4 text-white" />
+              <span>Ваши треки ({myTracks.length})</span>
+            </h3>
+
+            {myTracks.length === 0 ? (
+              <p className="text-xs text-zinc-500 py-4 text-center">
+                У вас пока нет загруженных треков. Воспользуйтесь формой выше, чтобы добавить первый!
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {myTracks.map((t) => (
+                  <div
+                    key={t.id}
+                    className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center space-x-3 overflow-hidden min-w-0 flex-1">
+                      <img src={t.coverUrl} alt={t.title} className="w-10 h-10 rounded-md object-cover shrink-0" />
+                      <div className="truncate min-w-0 flex-1">
+                        <div className="flex items-center space-x-2 truncate">
+                          <p className="text-xs font-bold text-white truncate">{t.title}</p>
+                          
+                          {/* Moderation Status Badge */}
+                          {t.moderationStatus === 'pending' && (
+                            <span className="px-2 py-0.5 text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-800 rounded-full shrink-0">
+                              На модерации
+                            </span>
+                          )}
+                          {(t.moderationStatus === 'approved' || !t.moderationStatus) && (
+                            <span className="px-2 py-0.5 text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-800 rounded-full shrink-0">
+                              Одобрен
+                            </span>
+                          )}
+                          {t.moderationStatus === 'rejected' && (
+                            <span className="px-2 py-0.5 text-[10px] font-mono bg-red-950/80 text-red-300 border border-red-800 rounded-full shrink-0">
+                              Отклонен
+                            </span>
+                          )}
+                        </div>
+                        
+                        <p className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                          {t.genre} · {t.playCount} стримов
+                          {t.rejectionReason && (
+                            <span className="block text-red-400 font-sans mt-0.5">
+                              Причина отказа: "{t.rejectionReason}"
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+                      <span className="text-xs font-mono font-bold text-emerald-400">
+                        +{(t.playCount * 0.10).toFixed(2)} ₽
+                      </span>
+                      <button
+                        onClick={() => onPlayTrack(t)}
+                        className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-md transition-colors"
+                        title="Слушать трек"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Withdraw Modal */}
+      {isWithdrawModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl p-6 space-y-6 shadow-2xl relative">
+            <button
+              onClick={() => setIsWithdrawModalOpen(false)}
+              className="absolute top-4 right-4 p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-900"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-white">Вывод авторских роялти</h3>
+              <p className="text-xs text-zinc-400">Сумма к зачислению: {calculatedEarnings.toFixed(2)} ₽</p>
+            </div>
+
+            {withdrawSuccess ? (
+              <div className="p-4 bg-emerald-950/60 border border-emerald-800 text-emerald-200 text-xs rounded-xl flex items-center space-x-3">
+                <Check className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span>Заявка на перевод {calculatedEarnings.toFixed(2)} ₽ успешно отправлена! Средства поступят в течение нескольких минут.</span>
+              </div>
+            ) : (
+              <form onSubmit={handleWithdrawSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase">
+                    Номер карты или телефона для СБП
+                  </label>
+                  <div className="relative">
+                    <CreditCard className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      required
+                      value={withdrawCard}
+                      onChange={(e) => setWithdrawCard(e.target.value)}
+                      placeholder="2200 •••• •••• 1234 или +7 (900) •••-••-••"
+                      className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:border-zinc-600"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors"
+                >
+                  Перевести {calculatedEarnings.toFixed(2)} ₽
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
