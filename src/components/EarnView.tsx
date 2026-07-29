@@ -14,11 +14,12 @@ import {
   Volume2
 } from 'lucide-react';
 import { Track, Genre, User } from '../types';
+import { uploadAudioFile, uploadCoverFile } from '../lib/tracksApi';
 
 interface EarnViewProps {
   currentUser: User | null;
   uploadedTracks: Track[];
-  onUploadTrack: (newTrack: Omit<Track, 'id' | 'playCount'>) => void;
+  onUploadTrack: (newTrack: Omit<Track, 'id' | 'playCount'>) => Promise<void>;
   onOpenAuth: () => void;
   onPlayTrack: (track: Track) => void;
   currentTrack: Track | null;
@@ -26,14 +27,20 @@ interface EarnViewProps {
 }
 
 const GENRES: Genre[] = [
-  'Ambient',
-  'Minimal Techno',
-  'Lo-Fi',
-  'Synthwave',
-  'Classical Piano',
-  'Post-Rock',
-  'Jazz Noir',
-  'Deep House'
+  'Pop',
+  'K-Pop / J-Pop',
+  'Hip-Hop / Rap',
+  'R&B / Soul / Funk',
+  'Rock / Alternative / Indie',
+  'Metal / Punk',
+  'Jazz / Blues',
+  'Electronic / EDM',
+  'Lo-fi / Ambient / Chillout',
+  'Country / Folk',
+  'Reggae / Ska',
+  'Latin / Afrobeats',
+  'Classical',
+  'Phonk / Synthwave / Retro'
 ];
 
 export const EarnView: React.FC<EarnViewProps> = ({
@@ -49,13 +56,17 @@ export const EarnView: React.FC<EarnViewProps> = ({
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState(currentUser?.name || '');
   const [album, setAlbum] = useState('Сингл');
-  const [genre, setGenre] = useState<Genre>('Ambient');
+  const [genre, setGenre] = useState<Genre>('Pop');
   const [year, setYear] = useState(2026);
   const [synthStyle, setSynthStyle] = useState<'ambient_pad' | 'lofi_chill' | 'synthwave_pulse' | 'piano_solo' | 'minimal_beat' | 'jazz_chords'>('lofi_chill');
   const [coverUrl, setCoverUrl] = useState('');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [uploadedAudioFileName, setUploadedAudioFileName] = useState('');
-  const [audioUrl, setAudioUrl] = useState('');
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState('');
   const [isSuccessMessage, setIsSuccessMessage] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [withdrawCard, setWithdrawCard] = useState('');
   const [withdrawSuccess, setWithdrawSuccess] = useState(false);
@@ -71,60 +82,84 @@ export const EarnView: React.FC<EarnViewProps> = ({
   const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setAudioFile(file);
       setUploadedAudioFileName(file.name);
-      // Create local object URL for preview/playback
-      const url = URL.createObjectURL(file);
-      setAudioUrl(url);
+      // Локальный предпросмотр в этой вкладке; реальный файл уйдёт в
+      // Supabase Storage только при отправке формы.
+      setAudioPreviewUrl(URL.createObjectURL(file));
     }
   };
 
   const handleCoverFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      setCoverUrl(url);
+      setCoverFile(file);
+      setCoverUrl(URL.createObjectURL(file));
     }
   };
 
-  const handleSubmitTrack = (e: React.FormEvent) => {
+  const handleSubmitTrack = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !artist.trim()) return;
 
-    const defaultCovers = [
-      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&q=80',
-      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80',
-      'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80',
-      'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&q=80'
-    ];
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
 
-    const randomCover = defaultCovers[Math.floor(Math.random() * defaultCovers.length)];
+    setSubmitError('');
+    setIsSubmitting(true);
 
-    onUploadTrack({
-      title,
-      artist,
-      album: album || 'Сингл',
-      genre,
-      year,
-      duration: 180 + Math.floor(Math.random() * 60),
-      coverUrl: coverUrl || randomCover,
-      audioUrl: audioUrl || undefined,
-      audioPattern: !audioUrl ? {
-        tempo: 80 + Math.floor(Math.random() * 40),
-        key: 'C minor',
-        synthStyle,
-        notes: [60, 63, 67, 70, 72, 67, 63, 60]
-      } : undefined,
-      uploadedBy: currentUser?.email || currentUser?.id || 'guest',
-      earningsCount: 0,
-      moderationStatus: 'pending',
-    });
+    try {
+      const defaultCovers = [
+        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&q=80',
+        'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80',
+        'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80',
+        'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&q=80'
+      ];
+      const randomCover = defaultCovers[Math.floor(Math.random() * defaultCovers.length)];
 
-    setIsSuccessMessage(true);
-    setTitle('');
-    setUploadedAudioFileName('');
-    setAudioUrl('');
-    setCoverUrl('');
-    setTimeout(() => setIsSuccessMessage(false), 4000);
+      // Реально загружаем файлы в Supabase Storage — только после этого
+      // трек попадёт в общую базу и будет виден модератору.
+      const finalAudioUrl = audioFile ? await uploadAudioFile(audioFile) : undefined;
+      const finalCoverUrl = coverFile ? await uploadCoverFile(coverFile) : randomCover;
+
+      await onUploadTrack({
+        title,
+        artist,
+        album: album || 'Сингл',
+        genre,
+        year,
+        duration: 180 + Math.floor(Math.random() * 60),
+        coverUrl: finalCoverUrl,
+        audioUrl: finalAudioUrl,
+        audioPattern: !finalAudioUrl ? {
+          tempo: 80 + Math.floor(Math.random() * 40),
+          key: 'C minor',
+          synthStyle,
+          notes: [60, 63, 67, 70, 72, 67, 63, 60]
+        } : undefined,
+        uploadedBy: currentUser.email,
+        earningsCount: 0,
+        moderationStatus: 'pending',
+      });
+
+      setIsSuccessMessage(true);
+      setTitle('');
+      setUploadedAudioFileName('');
+      setAudioFile(null);
+      setAudioPreviewUrl('');
+      setCoverFile(null);
+      setCoverUrl('');
+      setTimeout(() => setIsSuccessMessage(false), 4000);
+    } catch (err: any) {
+      console.error('Track upload failed:', err);
+      setSubmitError(
+        err?.message || 'Не удалось отправить трек. Проверьте подключение к Supabase и попробуйте ещё раз.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleWithdrawSubmit = (e: React.FormEvent) => {
@@ -220,6 +255,13 @@ export const EarnView: React.FC<EarnViewProps> = ({
               <div className="p-4 bg-amber-950/50 border border-amber-800 text-amber-200 text-xs rounded-lg flex items-center space-x-3">
                 <Check className="w-5 h-5 text-amber-400 shrink-0" />
                 <span>Ваш трек успешно отправлен на модерацию! Модератор проверит его в ближайшее время.</span>
+              </div>
+            )}
+
+            {submitError && (
+              <div className="p-4 bg-red-950/50 border border-red-800 text-red-200 text-xs rounded-lg flex items-center space-x-3">
+                <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                <span>{submitError}</span>
               </div>
             )}
 
@@ -321,8 +363,8 @@ export const EarnView: React.FC<EarnViewProps> = ({
                       <option value="ambient_pad">Ambient Warm Pad</option>
                       <option value="synthwave_pulse">Synthwave Bassline</option>
                       <option value="piano_solo">Solo Piano Harmony</option>
-                      <option value="minimal_beat">Minimal Techno Rhythm</option>
-                      <option value="jazz_chords">Noir Jazz Chords</option>
+                      <option value="minimal_beat">Minimal Beat / EDM</option>
+                      <option value="jazz_chords">Jazz Chords</option>
                     </select>
                   </div>
                 )}
@@ -344,10 +386,20 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-3.5 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors shadow-md flex items-center justify-center space-x-2"
+                disabled={isSubmitting}
+                className="w-full py-3.5 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors shadow-md flex items-center justify-center space-x-2 disabled:opacity-50"
               >
-                <Sparkles className="w-4 h-4 fill-black" />
-                <span>Опубликовать трек и начать монетизацию</span>
+                {isSubmitting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    <span>Загрузка трека...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 fill-black" />
+                    <span>Опубликовать трек и начать монетизацию</span>
+                  </>
+                )}
               </button>
             </form>
           </div>

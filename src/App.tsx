@@ -15,6 +15,8 @@ import {
 } from './lib/offlineDb';
 import { globalAudioEngine } from './lib/audioEngine';
 import { syncUserProfile } from './lib/recommendationEngine';
+import { supabase } from './lib/supabaseClient';
+import { fetchTracks, submitTrack, approveTrackRemote, rejectTrackRemote } from './lib/tracksApi';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -49,35 +51,22 @@ function getOrCreateGuestId(): string {
 
 export default function App() {
   // Main State
-  const [tracks, setTracks] = useState<Track[]>(() => {
-    const saved = localStorage.getItem('monosound_uploaded_tracks');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return [...parsed, ...INITIAL_TRACKS];
-      } catch (e) {
-        return INITIAL_TRACKS;
-      }
-    }
-    return INITIAL_TRACKS;
-  });
+  // INITIAL_TRACKS — встроенный демо-каталог, всегда виден всем.
+  // Треки, загруженные пользователями, подгружаются из Supabase отдельным
+  // эффектом ниже (см. loadRemoteTracks) — единый источник правды для
+  // модерации, а не localStorage конкретного браузера.
+  const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
 
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {
     const saved = localStorage.getItem('monosound_playlists');
     return saved ? JSON.parse(saved) : INITIAL_PLAYLISTS;
   });
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('monosound_user');
-    if (!saved) return null;
-    try {
-      const user: User = JSON.parse(saved);
-      const isActualAdmin = user.email.trim().toLowerCase() === 'tinbotoleg@gmail.com' && user.isAdmin;
-      return { ...user, isAdmin: isActualAdmin };
-    } catch (e) {
-      return null;
-    }
-  });
+  // currentUser отражает реальную сессию Supabase Auth (см. useEffect ниже
+  // с onAuthStateChange) — это то, что видит RLS на сервере, поэтому
+  // именно от неё зависит, какие треки вернёт fetchTracks().
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   // Stable identifier used for cross-user "similar taste" comparison on
   // the music server. Logged-in users use their account id; guests get a
@@ -95,7 +84,7 @@ export default function App() {
       : {
           likedTrackIds: INITIAL_TRACKS.filter(t => t.isLiked).map(t => t.id),
           history: [],
-          favoriteGenres: { Ambient: 15, 'Lo-Fi': 20, 'Minimal Techno': 10 },
+          favoriteGenres: { 'Lo-fi / Ambient / Chillout': 35, 'Electronic / EDM': 10 },
           favoriteArtists: {},
           totalTimeListenedSeconds: 0,
         };
@@ -132,16 +121,60 @@ export default function App() {
     }).catch(err => console.warn('IndexedDB load warning:', err));
   }, []);
 
-  // Save User to localStorage
+  // Restore/track the real Supabase Auth session and keep currentUser in
+  // sync with it (login, logout, token refresh — all flow through here).
   useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('monosound_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('monosound_user');
+    function buildAppUser(supabaseUser: { id: string; email?: string | null; user_metadata?: any }): User {
+      const email = (supabaseUser.email || '').trim().toLowerCase();
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const isAdmin = email === 'tinbotoleg@gmail.com';
+      return {
+        id: supabaseUser.id,
+        email,
+        name: supabaseUser.user_metadata?.name || email.split('@')[0],
+        isSubscribed: isAdmin,
+        subscriptionExpiresAt: isAdmin ? Date.now() + 365 * 24 * 60 * 60 * 1000 : null,
+        dailyPlaysCount: 0,
+        lastPlayDate: todayStr,
+        artistEarnings: 0,
+        isAdmin,
+      };
     }
-  }, [currentUser]);
 
-  // Protect Admin Tab (only tinbotoleg@gmail.com with admin role)
+    supabase.auth.getSession().then(({ data }) => {
+      setCurrentUser(data.session?.user ? buildAppUser(data.session.user) : null);
+      setIsAuthLoading(false);
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ? buildAppUser(session.user) : null);
+    });
+
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
+  // Load tracks from Supabase. RLS decides what comes back: everyone gets
+  // 'approved' tracks, the uploader also gets their own pending/rejected
+  // ones, and the admin gets literally everything (needed for /admin).
+  // Refetch whenever the logged-in identity changes so switching to the
+  // admin account immediately reveals the moderation queue.
+  useEffect(() => {
+    if (isAuthLoading) return;
+    let cancelled = false;
+
+    fetchTracks().then((remoteTracks) => {
+      if (cancelled) return;
+      const localIds = new Set(INITIAL_TRACKS.map((t) => t.id));
+      setTracks((prev) => {
+        const preservedLocalDemo = prev.filter((t) => localIds.has(t.id));
+        return [...preservedLocalDemo, ...remoteTracks];
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, isAuthLoading]);
   useEffect(() => {
     const isActualAdmin = currentUser?.email.trim().toLowerCase() === 'tinbotoleg@gmail.com' && currentUser?.isAdmin;
     if (activeTab === 'admin' && !isActualAdmin) {
@@ -285,19 +318,15 @@ export default function App() {
     });
   };
 
-  const handleUploadTrack = (newTrackData: Omit<Track, 'id' | 'playCount'>) => {
-    const createdTrack: Track = {
-      ...newTrackData,
-      id: `track-uploaded-${Date.now()}`,
-      playCount: 0,
-      earningsCount: 0,
-    };
-    setTracks((prev) => {
-      const updated = [createdTrack, ...prev];
-      const customOnly = updated.filter((t) => t.id.startsWith('track-uploaded-'));
-      localStorage.setItem('monosound_uploaded_tracks', JSON.stringify(customOnly));
-      return updated;
-    });
+  const handleUploadTrack = async (newTrackData: Omit<Track, 'id' | 'playCount'>) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    // uploaded_by в базе должен совпадать с email текущей сессии — так
+    // проверяет политика INSERT в Supabase.
+    const created = await submitTrack(newTrackData, currentUser.email);
+    setTracks((prev) => [created, ...prev]);
   };
 
   const handleToggleSubscription = (activate: boolean) => {
@@ -490,6 +519,10 @@ export default function App() {
         t.id === trackId ? { ...t, moderationStatus: 'approved', rejectionReason: undefined } : t
       )
     );
+    approveTrackRemote(trackId).catch((err) => {
+      console.error('Approve failed:', err);
+      alert('Не удалось одобрить трек в Supabase. Проверьте подключение и права администратора.');
+    });
   };
 
   const handleRejectTrack = (trackId: string, reason: string) => {
@@ -498,6 +531,10 @@ export default function App() {
         t.id === trackId ? { ...t, moderationStatus: 'rejected', rejectionReason: reason } : t
       )
     );
+    rejectTrackRemote(trackId, reason).catch((err) => {
+      console.error('Reject failed:', err);
+      alert('Не удалось отклонить трек в Supabase. Проверьте подключение и права администратора.');
+    });
   };
 
   const handleToggleDownload = async (track: Track) => {
@@ -798,7 +835,7 @@ export default function App() {
               <ProfileView
                 currentUser={currentUser}
                 onOpenAuth={() => setIsAuthModalOpen(true)}
-                onLogout={() => setCurrentUser(null)}
+                onLogout={() => supabase.auth.signOut()}
                 onToggleSubscription={handleToggleSubscription}
                 onNavigateToEarn={() => setActiveTab('earn')}
               />

@@ -7,7 +7,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'Noir Soundscape',
     album: 'Shadows & Light',
     duration: 184,
-    genre: 'Ambient',
+    genre: 'Lo-fi / Ambient / Chillout',
     year: 2024,
     coverUrl: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -28,7 +28,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'KRAFT & PULSE',
     album: 'Zero Signals',
     duration: 210,
-    genre: 'Minimal Techno',
+    genre: 'Electronic / EDM',
     year: 2025,
     coverUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -49,7 +49,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'Lo-Fi Monochrome',
     album: 'Rainy Sidewalks',
     duration: 156,
-    genre: 'Lo-Fi',
+    genre: 'Lo-fi / Ambient / Chillout',
     year: 2023,
     coverUrl: 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -69,7 +69,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'Brian Mono',
     album: 'Minimal Structures',
     duration: 245,
-    genre: 'Ambient',
+    genre: 'Lo-fi / Ambient / Chillout',
     year: 2022,
     coverUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -89,7 +89,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'Synth Noir',
     album: 'Dark Wave 2088',
     duration: 198,
-    genre: 'Synthwave',
+    genre: 'Phonk / Synthwave / Retro',
     year: 2024,
     coverUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -109,7 +109,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'Elena Vance',
     album: 'Solitude on Keys',
     duration: 228,
-    genre: 'Classical Piano',
+    genre: 'Classical',
     year: 2023,
     coverUrl: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -129,7 +129,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'Noir Soundscape',
     album: 'Shadows & Light',
     duration: 215,
-    genre: 'Post-Rock',
+    genre: 'Rock / Alternative / Indie',
     year: 2024,
     coverUrl: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -149,7 +149,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'The Monochrome Trio',
     album: 'Late Night Sessions',
     duration: 202,
-    genre: 'Jazz Noir',
+    genre: 'Jazz / Blues',
     year: 2021,
     coverUrl: 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -169,7 +169,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'KRAFT & PULSE',
     album: 'Zero Signals',
     duration: 189,
-    genre: 'Deep House',
+    genre: 'Electronic / EDM',
     year: 2025,
     coverUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -189,7 +189,7 @@ export const INITIAL_TRACKS: Track[] = [
     artist: 'Lo-Fi Monochrome',
     album: 'Rainy Sidewalks',
     duration: 167,
-    genre: 'Lo-Fi',
+    genre: 'Lo-fi / Ambient / Chillout',
     year: 2023,
     coverUrl: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=500&auto=format&fit=crop&q=80',
     audioPattern: {
@@ -219,7 +219,7 @@ export const INITIAL_PLAYLISTS: Playlist[] = [
   {
     id: 'playlist-focus',
     title: 'Глубокая Концентрация',
-    description: 'Минималистичные эмбиент и лоу-фай ритмы для работы и учебы',
+    description: 'Минималистичные lo-fi и эмбиент ритмы для работы и учебы',
     coverUrl: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=500&auto=format&fit=crop&q=80',
     trackIds: ['track-1', 'track-3', 'track-4', 'track-10'],
     createdAt: Date.now() - 86400000 * 5,
@@ -228,7 +228,7 @@ export const INITIAL_PLAYLISTS: Playlist[] = [
   {
     id: 'playlist-night',
     title: 'Ночной Вайб',
-    description: 'Синтвейв и минимал техно для поздних часов',
+    description: 'Synthwave и электроника для поздних часов',
     coverUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
     trackIds: ['track-2', 'track-5', 'track-8', 'track-9'],
     createdAt: Date.now() - 86400000 * 2,

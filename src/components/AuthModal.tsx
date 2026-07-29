@@ -1,10 +1,31 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User as UserIcon, X, Check, ArrowRight, ShieldCheck, Key, RefreshCw } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, X, Check, ArrowRight } from 'lucide-react';
 import { User } from '../types';
+import { supabase } from '../lib/supabaseClient';
 
 interface AuthModalProps {
   onClose: () => void;
   onLoginSuccess: (user: User) => void;
+}
+
+const ADMIN_EMAIL = 'tinbotoleg@gmail.com';
+
+function buildAppUser(supabaseUser: { id: string; email?: string | null; user_metadata?: any }): User {
+  const email = (supabaseUser.email || '').trim().toLowerCase();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isAdmin = email === ADMIN_EMAIL;
+
+  return {
+    id: supabaseUser.id,
+    email,
+    name: supabaseUser.user_metadata?.name || email.split('@')[0],
+    isSubscribed: isAdmin, // админ по умолчанию с полным доступом
+    subscriptionExpiresAt: isAdmin ? Date.now() + 365 * 24 * 60 * 60 * 1000 : null,
+    dailyPlaysCount: 0,
+    lastPlayDate: todayStr,
+    artistEarnings: 0,
+    isAdmin,
+  };
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess }) => {
@@ -13,37 +34,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
-  
-  // Password reset result
-  const [resetSuccessState, setResetSuccessState] = useState<{ email: string; newPassword: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
 
-  // Helper to get stored password for an email
-  const getStoredPassword = (targetEmail: string): string => {
-    const key = `monosound_pwd_${targetEmail.trim().toLowerCase()}`;
-    const saved = localStorage.getItem(key);
-    if (saved) return saved;
-    if (targetEmail.trim().toLowerCase() === 'tinbotoleg@gmail.com') {
-      return '18fhghdjghgn3ef';
-    }
-    return '';
-  };
-
-  // Helper to save password for an email
-  const savePassword = (targetEmail: string, pwd: string) => {
-    const key = `monosound_pwd_${targetEmail.trim().toLowerCase()}`;
-    localStorage.setItem(key, pwd);
-  };
-
-  const generateRandomPassword = (): string => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-    let result = 'Ms-';
-    for (let i = 0; i < 6; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -54,12 +48,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
         setError('Укажите вашу электронную почту');
         return;
       }
-      const newPwd = generateRandomPassword();
-      savePassword(cleanEmail, newPwd);
-      setResetSuccessState({
-        email: cleanEmail,
-        newPassword: newPwd,
-      });
+      setIsSubmitting(true);
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+      setIsSubmitting(false);
+      if (resetError) {
+        setError(resetError.message);
+        return;
+      }
+      setResetEmailSent(true);
       return;
     }
 
@@ -73,73 +69,47 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
       return;
     }
 
-    // Check if logging in as Admin (tinbotoleg@gmail.com)
-    if (cleanEmail === 'tinbotoleg@gmail.com') {
-      const requiredAdminPwd = getStoredPassword('tinbotoleg@gmail.com');
-      if (password !== requiredAdminPwd) {
-        setError(`Неверный пароль для администратора. Для входа требуется пароль "${requiredAdminPwd}".`);
+    setIsSubmitting(true);
+
+    if (mode === 'register') {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: { data: { name } },
+      });
+      setIsSubmitting(false);
+
+      if (signUpError) {
+        setError(signUpError.message);
         return;
       }
 
-      // Admin Login Success
-      savePassword(cleanEmail, password);
-      const todayStr = new Date().toISOString().slice(0, 10);
-      const adminUser: User = {
-        id: 'admin-oleg',
-        email: 'tinbotoleg@gmail.com',
-        name: name || 'Олег (Администратор)',
-        isSubscribed: true,
-        subscriptionExpiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
-        dailyPlaysCount: 0,
-        lastPlayDate: todayStr,
-        artistEarnings: 0,
-        isAdmin: true,
-      };
+      // Если в проекте включено подтверждение email, сессии на этом шаге
+      // ещё не будет — сообщаем пользователю проверить почту.
+      if (!data.session || !data.user) {
+        setError('Проверьте почту и подтвердите регистрацию, затем войдите.');
+        setMode('login');
+        return;
+      }
 
-      onLoginSuccess(adminUser);
+      onLoginSuccess(buildAppUser(data.user));
       onClose();
       return;
     }
 
-    // Standard User Login / Registration
-    savePassword(cleanEmail, password);
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const userObj: User = {
-      id: `user-${Date.now()}`,
+    // mode === 'login'
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email: cleanEmail,
-      name: name || cleanEmail.split('@')[0],
-      isSubscribed: false,
-      subscriptionExpiresAt: null,
-      dailyPlaysCount: 0,
-      lastPlayDate: todayStr,
-      artistEarnings: 0,
-      isAdmin: false, // Strict: only tinbotoleg@gmail.com is admin
-    };
+      password,
+    });
+    setIsSubmitting(false);
 
-    onLoginSuccess(userObj);
-    onClose();
-  };
+    if (signInError) {
+      setError('Неверный email или пароль.');
+      return;
+    }
 
-  const handleAdminQuickLogin = () => {
-    const adminPwd = getStoredPassword('tinbotoleg@gmail.com');
-    setEmail('tinbotoleg@gmail.com');
-    setPassword(adminPwd);
-    setMode('login');
-
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const adminUser: User = {
-      id: 'admin-oleg',
-      email: 'tinbotoleg@gmail.com',
-      name: 'Олег (Администратор)',
-      isSubscribed: true,
-      subscriptionExpiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
-      dailyPlaysCount: 0,
-      lastPlayDate: todayStr,
-      artistEarnings: 0,
-      isAdmin: true,
-    };
-
-    onLoginSuccess(adminUser);
+    onLoginSuccess(buildAppUser(data.user));
     onClose();
   };
 
@@ -159,14 +129,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
               ? 'Вход в MonoSound'
               : mode === 'register'
               ? 'Создать аккаунт'
-              : 'Сброс и восстановление пароля'}
+              : 'Восстановление пароля'}
           </h3>
           <p className="text-xs text-zinc-400">
             {mode === 'login'
               ? 'Войдите для управления подпиской и публикации треков'
               : mode === 'register'
               ? 'Зарегистрируйтесь для подписки за 59 ₽/мес и заработка на музыке'
-              : 'Укажите email — мы отправим вам письмо с новым сгенерированным паролем'}
+              : 'Укажите email — мы отправим ссылку для сброса пароля'}
           </p>
         </div>
 
@@ -176,41 +146,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
           </div>
         )}
 
-        {/* Reset Password Success Email Simulation */}
-        {mode === 'forgot' && resetSuccessState ? (
+        {mode === 'forgot' && resetEmailSent ? (
           <div className="p-4 bg-emerald-950/70 border border-emerald-800/90 rounded-xl space-y-3 animate-fade-in">
             <div className="flex items-center space-x-2 text-emerald-300 font-bold text-xs">
               <Mail className="w-4 h-4 shrink-0" />
-              <span>Письмо успешно отправлено на {resetSuccessState.email}!</span>
+              <span>Письмо со ссылкой для сброса пароля отправлено на {email.trim().toLowerCase()}</span>
             </div>
-
-            <div className="text-xs text-emerald-100 font-mono bg-emerald-900/40 p-3 rounded-lg border border-emerald-800/80 space-y-2">
-              <p className="text-[10px] text-emerald-400 font-sans uppercase font-bold tracking-wider">
-                Входящее письмо: Восстановление доступа MonoSound
-              </p>
-              <p className="text-emerald-200">
-                Ваш пароль был изменен. Новый автоматически сгенерированный пароль:
-              </p>
-              <div className="text-white text-base tracking-widest font-bold select-all bg-black/50 p-2 rounded border border-emerald-700/80 text-center my-1 font-mono">
-                {resetSuccessState.newPassword}
-              </div>
-              <p className="text-[11px] text-emerald-300 font-sans">
-                Используйте этот пароль для входа в личный кабинет.
-              </p>
-            </div>
-
+            <p className="text-[11px] text-emerald-300/90">
+              Перейдите по ссылке из письма, задайте новый пароль и вернитесь ко входу.
+            </p>
             <button
               type="button"
               onClick={() => {
-                setEmail(resetSuccessState.email);
-                setPassword(resetSuccessState.newPassword);
                 setMode('login');
-                setResetSuccessState(null);
+                setResetEmailSent(false);
               }}
               className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center space-x-2 shadow-md"
             >
               <Check className="w-4 h-4" />
-              <span>Подставить пароль и войти</span>
+              <span>Вернуться ко входу</span>
             </button>
           </div>
         ) : (
@@ -268,6 +222,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
                   <input
                     type="password"
                     required
+                    minLength={6}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
@@ -279,16 +234,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
 
             <button
               type="submit"
-              className="w-full py-3 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors flex items-center justify-center space-x-2"
+              disabled={isSubmitting}
+              className="w-full py-3 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50"
             >
-              <span>
-                {mode === 'login'
-                  ? 'Войти'
-                  : mode === 'register'
-                  ? 'Зарегистрироваться'
-                  : 'Отправить новый пароль на почту'}
-              </span>
-              <ArrowRight className="w-4 h-4" />
+              {isSubmitting ? (
+                <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <span>
+                    {mode === 'login'
+                      ? 'Войти'
+                      : mode === 'register'
+                      ? 'Зарегистрироваться'
+                      : 'Отправить ссылку для сброса'}
+                  </span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
         )}
@@ -298,7 +260,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
             <button
               onClick={() => {
                 setError('');
-                setResetSuccessState(null);
+                setResetEmailSent(false);
                 setMode(mode === 'login' ? 'register' : 'login');
               }}
               className="hover:text-white underline underline-offset-4"
@@ -310,7 +272,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
               <button
                 onClick={() => {
                   setError('');
-                  setResetSuccessState(null);
+                  setResetEmailSent(false);
                   setMode('login');
                 }}
                 className="text-zinc-400 hover:text-white font-mono text-[11px]"
@@ -319,14 +281,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
               </button>
             )}
           </div>
-
-          <button
-            onClick={handleAdminQuickLogin}
-            className="w-full py-2 bg-zinc-900 hover:bg-amber-950/40 hover:border-amber-700/80 border border-zinc-800 text-amber-300 text-[11px] font-mono rounded-lg transition-colors flex items-center justify-center space-x-2"
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-            <span>Вход Администратора (tinbotoleg@gmail.com)</span>
-          </button>
         </div>
       </div>
     </div>

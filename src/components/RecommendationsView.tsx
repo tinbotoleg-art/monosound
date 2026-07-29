@@ -91,7 +91,7 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
           <div className="pt-2 grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg">
               <span className="text-[10px] font-mono uppercase text-zinc-500">Топовый Жанр</span>
-              <p className="text-sm font-bold text-white mt-0.5">{topGenres[0]?.[0] || 'Ambient'}</p>
+              <p className="text-sm font-bold text-white mt-0.5">{topGenres[0]?.[0] || 'Lo-fi / Ambient / Chillout'}</p>
             </div>
             <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg">
               <span className="text-[10px] font-mono uppercase text-zinc-500">Любимых треков</span>

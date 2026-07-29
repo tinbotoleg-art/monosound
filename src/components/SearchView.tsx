@@ -19,14 +19,20 @@ interface SearchViewProps {
 }
 
 const GENRES: Genre[] = [
-  'Ambient',
-  'Minimal Techno',
-  'Lo-Fi',
-  'Synthwave',
-  'Classical Piano',
-  'Post-Rock',
-  'Jazz Noir',
-  'Deep House'
+  'Pop',
+  'K-Pop / J-Pop',
+  'Hip-Hop / Rap',
+  'R&B / Soul / Funk',
+  'Rock / Alternative / Indie',
+  'Metal / Punk',
+  'Jazz / Blues',
+  'Electronic / EDM',
+  'Lo-fi / Ambient / Chillout',
+  'Country / Folk',
+  'Reggae / Ska',
+  'Latin / Afrobeats',
+  'Classical',
+  'Phonk / Synthwave / Retro'
 ];
 
 export const SearchView: React.FC<SearchViewProps> = ({
