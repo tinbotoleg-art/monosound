@@ -14,6 +14,7 @@ import {
   clearAllOfflineData 
 } from './lib/offlineDb';
 import { globalAudioEngine } from './lib/audioEngine';
+import { syncUserProfile } from './lib/recommendationEngine';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -33,6 +34,18 @@ import { ProfileView } from './components/ProfileView';
 import { AdminView } from './components/AdminView';
 
 import { Sparkles, HardDriveDownload, Play, Heart, Disc, Radio, RefreshCw, Coins, Trophy, Flame, ShieldCheck } from 'lucide-react';
+
+// Stable anonymous id for guests, so their taste profile can still be
+// compared against other users' profiles on the server.
+function getOrCreateGuestId(): string {
+  const key = 'monosound_guest_id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `guest-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
 
 export default function App() {
   // Main State
@@ -65,6 +78,12 @@ export default function App() {
       return null;
     }
   });
+
+  // Stable identifier used for cross-user "similar taste" comparison on
+  // the music server. Logged-in users use their account id; guests get a
+  // persisted anonymous id.
+  const [guestId] = useState<string>(() => getOrCreateGuestId());
+  const userId = currentUser?.id || guestId;
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSubscriptionLimitModalOpen, setIsSubscriptionLimitModalOpen] = useState(false);
@@ -147,10 +166,14 @@ export default function App() {
     localStorage.setItem('monosound_playlists', JSON.stringify(playlists));
   }, [playlists]);
 
-  // Save Preferences to localStorage
+  // Save Preferences to localStorage + push to the music server so this
+  // user's taste can be compared against other users ("similar users"
+  // recommendations). Silently no-ops if VITE_API_BASE_URL isn't set or
+  // the server is unreachable.
   useEffect(() => {
     localStorage.setItem('monosound_preferences', JSON.stringify(preferenceProfile));
-  }, [preferenceProfile]);
+    syncUserProfile(userId, preferenceProfile);
+  }, [preferenceProfile, userId]);
 
   // Setup Audio Engine Callbacks
   useEffect(() => {
@@ -626,7 +649,7 @@ export default function App() {
                       Минимализм. Звук. Автономия.
                     </h1>
                     <p className="text-xs text-zinc-400 leading-relaxed">
-                      Создавайте собственные плейлисты, скачивайте аудио для полного офлайн-доступа и получайте персональные AI-рекомендации без лишнего шума.
+                      Создавайте собственные плейлисты, скачивайте аудио для полного офлайн-доступа и получайте персональные рекомендации без лишнего шума.
                     </p>
                     <div className="pt-2 flex items-center space-x-3">
                       <button
@@ -687,15 +710,15 @@ export default function App() {
                       <Sparkles className="w-5 h-5 text-white" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-white">Персональный AI Микс</h3>
-                      <p className="text-xs text-zinc-400">Сформирован на основе вашей истории и лайков</p>
+                      <h3 className="text-sm font-bold text-white">Персональный Микс</h3>
+                      <p className="text-xs text-zinc-400">По жанрам, артистам и похожим слушателям</p>
                     </div>
                   </div>
                   <button
                     onClick={() => setActiveTab('recommendations')}
                     className="px-3.5 py-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-xs font-semibold text-white rounded-lg transition-colors"
                   >
-                    Открыть AI Рекомендации →
+                    Открыть Рекомендации →
                   </button>
                 </div>
 
@@ -749,6 +772,7 @@ export default function App() {
               />
             ) : activeTab === 'recommendations' ? (
               <RecommendationsView
+                userId={userId}
                 allTracks={visibleTracks}
                 preferenceProfile={preferenceProfile}
                 currentTrack={currentTrack}

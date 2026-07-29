@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, RefreshCw, Disc, Heart, BarChart3, Radio, Play } from 'lucide-react';
+import { Sparkles, RefreshCw, Disc, Heart, BarChart3, Radio, Play, Users } from 'lucide-react';
 import { Track, PreferenceProfile, RecommendationReason, Playlist } from '../types';
-import { fetchAiRecommendations } from '../lib/aiRecommendations';
+import { getRecommendations } from '../lib/recommendationEngine';
 import { TrackCard } from './TrackCard';
 
 interface RecommendationsViewProps {
+  userId: string;
   allTracks: Track[];
   preferenceProfile: PreferenceProfile;
   currentTrack: Track | null;
@@ -17,7 +18,16 @@ interface RecommendationsViewProps {
   onAddToPlaylist: (playlistId: string, trackId: string) => void;
 }
 
+const CATEGORY_LABELS: Record<RecommendationReason['category'], string> = {
+  like_based: 'Избранное',
+  genre_match: 'Жанр',
+  artist_affinity: 'Артист',
+  similar_user: 'Похожие слушатели',
+  discovery: 'Открытие',
+};
+
 export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
+  userId,
   allTracks,
   preferenceProfile,
   currentTrack,
@@ -37,7 +47,7 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
   const loadRecommendations = async (mood?: string) => {
     setIsLoading(true);
     try {
-      const res = await fetchAiRecommendations(preferenceProfile, allTracks, mood);
+      const res = await getRecommendations(userId, preferenceProfile, allTracks, mood);
       setRecommendations(res.recommendations);
       setSummaryText(res.summaryText);
     } finally {
@@ -47,6 +57,7 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
 
   useEffect(() => {
     loadRecommendations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const recommendedTracks = recommendations
@@ -67,13 +78,13 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
         <div className="relative z-10 max-w-2xl space-y-4">
           <div className="inline-flex items-center space-x-2 px-2.5 py-1 bg-zinc-900 border border-zinc-800 rounded-full text-[10px] font-mono uppercase text-zinc-300">
             <Sparkles className="w-3.5 h-3.5 text-white fill-white" />
-            <span>Интеллектуальный рекомендательный движок</span>
+            <span>Рекомендательная система</span>
           </div>
           <h2 className="text-2xl font-bold tracking-tight text-white">
-            Персональные AI Рекомендации
+            Персональные рекомендации
           </h2>
           <p className="text-xs text-zinc-400 leading-relaxed">
-            Система непрерывно анализирует ваши лайки, прослушанные жанры и предпочтения артистов, формируя индивидуальный звук под ваше текущее настроение.
+            Подборка строится по трём правилам: любимые жанры, любимые артисты и вкусы пользователей, которые слушают похожую музыку (совпадение 70–100% по трекам).
           </p>
 
           {/* User Profile Mini Stats */}
@@ -94,10 +105,10 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
         </div>
       </div>
 
-      {/* Custom Mood Generator Prompt Box */}
+      {/* Mood Filter Box (keyword-based, no external calls) */}
       <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-3">
         <label className="block text-xs font-mono uppercase text-zinc-400">
-          Укажите настроение для адаптивной подборки
+          Уточнить подборку по настроению (по жанрам)
         </label>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
@@ -122,10 +133,10 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
         </div>
       </div>
 
-      {/* Summary AI Insights */}
+      {/* Summary Insights */}
       {summaryText && (
         <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg flex items-start space-x-3">
-          <Radio className="w-4 h-4 text-white shrink-0 mt-0.5" />
+          <Users className="w-4 h-4 text-white shrink-0 mt-0.5" />
           <p className="text-xs text-zinc-300 italic">{summaryText}</p>
         </div>
       )}
@@ -150,7 +161,7 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
             <div key={track.id} className="space-y-1">
               <div className="flex items-center space-x-2 px-2 text-[10px] font-mono text-zinc-400">
                 <span className="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-300 font-semibold">
-                  {reasonInfo.matchScore}% Совпадение
+                  {reasonInfo.matchScore}% · {CATEGORY_LABELS[reasonInfo.category]}
                 </span>
                 <span>— {reasonInfo.reason}</span>
               </div>

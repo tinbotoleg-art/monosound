@@ -79,8 +79,8 @@ export interface RecommendationReason {
   reason: string;
   score: number;
   matchScore: number;
-  category: 'like_based' | 'genre_match' | 'artist_affinity' | 'ai_curated' | 'discovery';
+  // 'similar_user' = похожие пользователи (70-100% совпадение по трекам)
+  category: 'like_based' | 'genre_match' | 'artist_affinity' | 'similar_user' | 'discovery';
 }
 
 export type ActiveTab = 'home' | 'search' | 'playlists' | 'playlist-detail' | 'recommendations' | 'offline' | 'liked' | 'earn' | 'profile' | 'admin';
-

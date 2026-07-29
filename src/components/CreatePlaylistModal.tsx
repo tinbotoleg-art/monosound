@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, Sparkles, Plus, Disc } from 'lucide-react';
+import { X, Wand2, Plus, Disc } from 'lucide-react';
 import { Track } from '../types';
-import { generateAiPlaylist } from '../lib/aiRecommendations';
+import { generateLocalPlaylist } from '../lib/recommendationEngine';
 
 interface CreatePlaylistModalProps {
   allTracks: Track[];
@@ -14,11 +14,11 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   onClose,
   onCreatePlaylist,
 }) => {
-  const [tab, setTab] = useState<'manual' | 'ai'>('manual');
+  const [tab, setTab] = useState<'manual' | 'smart'>('manual');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [isAiGenerating, setIsAiGenerating] = useState(false);
+  const [moodPrompt, setMoodPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,12 +31,12 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
     onClose();
   };
 
-  const handleAiGenerate = async (e: React.FormEvent) => {
+  const handleSmartGenerate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aiPrompt.trim()) return;
-    setIsAiGenerating(true);
+    if (!moodPrompt.trim()) return;
+    setIsGenerating(true);
     try {
-      const res = await generateAiPlaylist(aiPrompt.trim(), allTracks);
+      const res = generateLocalPlaylist(moodPrompt.trim(), allTracks);
       onCreatePlaylist({
         title: res.title,
         description: res.description,
@@ -44,7 +44,7 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
       });
       onClose();
     } finally {
-      setIsAiGenerating(false);
+      setIsGenerating(false);
     }
   };
 
@@ -76,13 +76,13 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
             Вручную
           </button>
           <button
-            onClick={() => setTab('ai')}
+            onClick={() => setTab('smart')}
             className={`flex-1 py-1.5 text-xs font-semibold rounded-md flex items-center justify-center space-x-1.5 transition-colors ${
-              tab === 'ai' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'
+              tab === 'smart' ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-white fill-white" />
-            <span>AI Генерация</span>
+            <Wand2 className="w-3.5 h-3.5" />
+            <span>По настроению</span>
           </button>
         </div>
 
@@ -133,19 +133,22 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
             </div>
           </form>
         ) : (
-          <form onSubmit={handleAiGenerate} className="p-5 space-y-4">
+          <form onSubmit={handleSmartGenerate} className="p-5 space-y-4">
             <div>
               <label className="block text-xs font-mono uppercase text-zinc-400 mb-1.5">
-                Аудио-настроение или запрос
+                Настроение или ситуация
               </label>
               <textarea
                 required
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="Опишите желаемую атмосферу, например: 'Минималистичный синтвейв и эмбиент для ночного кодинга', или 'Спокойное классическое пианино для чтения'..."
+                value={moodPrompt}
+                onChange={(e) => setMoodPrompt(e.target.value)}
+                placeholder="Например: 'Ночной кодинг', 'Спокойное чтение вечером', 'Тренировка'..."
                 rows={4}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
               />
+              <p className="text-[10px] text-zinc-500 mt-1.5">
+                Плейлист собирается по ключевым словам и жанрам каталога — без внешних сервисов.
+              </p>
             </div>
 
             <div className="pt-2 flex justify-end space-x-2">
@@ -158,17 +161,17 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={isAiGenerating}
+                disabled={isGenerating}
                 className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-lg transition-colors shadow-md flex items-center space-x-2 disabled:opacity-50"
               >
-                {isAiGenerating ? (
+                {isGenerating ? (
                   <>
                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
                     <span>Сборка микса...</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5 fill-black" />
+                    <Wand2 className="w-3.5 h-3.5" />
                     <span>Сгенерировать</span>
                   </>
                 )}
