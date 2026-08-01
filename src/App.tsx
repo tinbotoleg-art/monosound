@@ -387,6 +387,19 @@ export default function App() {
     globalAudioEngine.seek(secs);
   };
 
+  // Кнопки на экране блокировки / в шторке уведомлений должны дёргать
+  // те же обработчики, что и кнопки в PlayerBar. Перерегистрируем на
+  // каждый рендер, где эти функции меняются — сам вызов дешёвый.
+  useEffect(() => {
+    globalAudioEngine.setMediaSessionHandlers({
+      onPlay: handlePlayPause,
+      onPause: handlePlayPause,
+      onNext: handleNext,
+      onPrev: handlePrev,
+      onSeek: handleSeek,
+    });
+  });
+
   const handleVolumeChange = (vol: number) => {
     setVolume(vol);
     setIsMuted(vol === 0);

@@ -1,49 +1,75 @@
 import { Track } from '../types';
 
+/**
+ * Почему плеер переписан на <audio>, а не остался на "чистом" Web Audio API:
+ *
+ * Браузеры (и Android, и iOS) разрешают продолжать воспроизведение и
+ * показывать элементы управления на экране блокировки ТОЛЬКО для
+ * настоящих media-элементов (<audio>/<video>), связанных с
+ * navigator.mediaSession. AudioBufferSourceNode "сам по себе" в фоне
+ * глушится агрессивнее и не показывается на экране блокировки — именно
+ * поэтому раньше это не работало вне активной вкладки.
+ *
+ * Analyser (для визуализатора) подключён поверх того же <audio>-элемента
+ * через createMediaElementSource — звук по-прежнему идёт со стандартного
+ * медиапайплайна браузера, а Web Audio используется только чтобы прочитать
+ * частотные данные для анимации.
+ */
 export class AudioEngine {
+  private audioEl: HTMLAudioElement;
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private gainNode: GainNode | null = null;
-  private currentSourceNode: AudioBufferSourceNode | null = null;
-  private isPlaying = false;
-  private startTime = 0;
-  private pauseOffset = 0;
-  private duration = 0;
+  private mediaSourceNode: MediaElementAudioSourceNode | null = null;
+
   private track: Track | null = null;
-  private activeBuffer: AudioBuffer | null = null;
+  private duration = 0;
+  private synthesizedUrlCache = new Map<string, string>();
 
   private onTimeUpdateCb?: (currentTime: number, duration: number) => void;
   private onEndedCb?: () => void;
   private updateInterval: number | null = null;
 
-  constructor() {}
+  constructor() {
+    this.audioEl = new Audio();
+    this.audioEl.preload = 'auto';
+    // playsInline не нужен для <audio>, но не мешает; крутится в памяти,
+    // в DOM элемент вставлять не обязательно.
+
+    this.audioEl.addEventListener('ended', () => {
+      this.stopProgressLoop();
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+      if (this.onEndedCb) this.onEndedCb();
+    });
+
+    // Если контекст "заснул" (частая история на мобильных при уходе в фон),
+    // будим его обратно, когда вкладка снова активна.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.ctx?.state === 'suspended' && !this.audioEl.paused) {
+        this.ctx.resume();
+      }
+    });
+  }
 
   private initContext() {
     if (!this.ctx) {
-      const AudioContextClass =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioContextClass();
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 64;
       this.gainNode = this.ctx.createGain();
+      this.mediaSourceNode = this.ctx.createMediaElementSource(this.audioEl);
+      this.mediaSourceNode.connect(this.gainNode);
       this.gainNode.connect(this.analyser);
       this.analyser.connect(this.ctx.destination);
     }
-
     if (this.ctx.state === 'suspended') {
       this.ctx.resume();
     }
   }
 
   public setVolume(volume: number) {
-    if (this.gainNode && this.ctx) {
-      this.gainNode.gain.setValueAtTime(
-        Math.max(0, Math.min(1, volume)),
-        this.ctx.currentTime
-      );
-    }
+    this.audioEl.volume = Math.max(0, Math.min(1, volume));
   }
 
   public getAnalyserData(): Uint8Array {
@@ -53,158 +79,62 @@ export class AudioEngine {
     return dataArray;
   }
 
-  /**
-   * Loads and decodes a real audio file into an AudioBuffer.
-   * Caches the result in this.activeBuffer so resume/seek
-   * don't trigger a second network request.
-   */
-  private async loadBuffer(track: Track): Promise<void> {
-    if (!this.ctx) return;
+  public async playTrack(track: Track, startOffset = 0): Promise<void> {
+    // initContext() требует предшествующего пользовательского жеста —
+    // он у нас есть, т.к. playTrack всегда вызывается из обработчика клика.
+    this.initContext();
 
-    if (track.audioUrl) {
-      console.log('[AudioEngine] Loading real audio:', track.audioUrl);
+    this.track = track;
+    this.duration = track.duration || 180;
 
-      const response = await fetch(track.audioUrl);
+    // Реальный загруженный файл (например, из Supabase Storage) стримится
+    // напрямую по URL. Синтезированные демо-треки рендерятся в WAV один раз
+    // и играются как blob — тоже через тот же <audio>, тоже с поддержкой фона.
+    const src = track.audioUrl || (await this.getOrCreateSynthesizedUrl(track));
 
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch audio: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      this.activeBuffer = await this.ctx.decodeAudioData(arrayBuffer);
-      this.duration = this.activeBuffer.duration;
-
-      console.log(
-        '[AudioEngine] Real audio loaded:',
-        this.duration,
-        'seconds'
-      );
-    } else {
-      console.log('[AudioEngine] No audioUrl — using procedural audio.');
-      this.duration = track.duration || 180;
-      this.activeBuffer = await this.generateProceduralBuffer(track);
+    if (this.audioEl.src !== src) {
+      this.audioEl.src = src;
     }
-  }
+    this.audioEl.currentTime = startOffset;
 
-  /**
-   * Starts playback from this.activeBuffer at the given offset.
-   * Assumes this.activeBuffer, this.ctx and this.gainNode are ready.
-   */
-  private playFromBuffer(offset: number): void {
-    if (!this.ctx || !this.gainNode || !this.activeBuffer) return;
+    try {
+      await this.audioEl.play();
+    } catch (err) {
+      // Автовоспроизведение могло быть заблокировано браузером —
+      // в норме это не должно случаться, т.к. вызов идёт из click-хендлера.
+      console.warn('[AudioEngine] play() blocked:', err);
+    }
 
-    this.stopCurrent();
+    this.updateMediaSessionMetadata(track);
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
 
-    const safeOffset = Math.min(
-      Math.max(0, offset),
-      Math.max(0, this.duration - 0.01)
-    );
-
-    this.pauseOffset = safeOffset;
-
-    this.currentSourceNode = this.ctx.createBufferSource();
-    this.currentSourceNode.buffer = this.activeBuffer;
-    this.currentSourceNode.connect(this.gainNode);
-
-    this.currentSourceNode.onended = () => {
-      if (this.isPlaying && this.getCurrentTime() >= this.duration - 0.5) {
-        this.isPlaying = false;
-        this.stopProgressLoop();
-        if (this.onEndedCb) this.onEndedCb();
-      }
-    };
-
-    this.startTime = this.ctx.currentTime - safeOffset;
-    this.currentSourceNode.start(0, safeOffset);
-    this.isPlaying = true;
     this.startProgressLoop();
   }
 
-  /**
-   * Plays a track.
-   * - If the same track is already buffered, reuses the buffer (no re-fetch).
-   * - If it's a new track, loads the file (or generates procedural audio).
-   * - Falls back to procedural audio if the real file fails to load.
-   */
-  public async playTrack(track: Track, startOffset = 0): Promise<void> {
-    this.initContext();
-    if (!this.ctx || !this.gainNode) return;
-
-    const isSameTrack = this.track?.id === track.id;
-
-    this.track = track;
-    this.pauseOffset = Math.max(0, startOffset);
-
-    try {
-      // Only fetch/generate the buffer when the track actually changes
-      if (!isSameTrack || !this.activeBuffer) {
-        await this.loadBuffer(track);
-      }
-
-      this.playFromBuffer(this.pauseOffset);
-    } catch (error) {
-      console.error('[AudioEngine] Failed to load real audio:', error);
-      console.warn('[AudioEngine] Falling back to procedural audio.');
-
-      try {
-        this.duration = track.duration || 180;
-        this.activeBuffer = await this.generateProceduralBuffer(track);
-        this.playFromBuffer(this.pauseOffset);
-      } catch (fallbackError) {
-        console.error('[AudioEngine] Procedural fallback failed:', fallbackError);
-        this.isPlaying = false;
-        this.stopProgressLoop();
-      }
-    }
-  }
-
   public pause(): void {
-    if (!this.isPlaying || !this.ctx) return;
-    this.pauseOffset = this.getCurrentTime();
-    this.stopCurrent();
-    this.isPlaying = false;
+    this.audioEl.pause();
     this.stopProgressLoop();
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
   }
 
-  /**
-   * Resumes playback reusing the cached buffer — no network request.
-   */
   public resume(): void {
-    if (!this.track || this.isPlaying) return;
-
-    if (this.activeBuffer && this.ctx && this.gainNode) {
-      this.playFromBuffer(this.pauseOffset);
-    } else {
-      void this.playTrack(this.track, this.pauseOffset);
-    }
+    this.audioEl.play().catch((err) => console.warn('[AudioEngine] resume() blocked:', err));
+    this.startProgressLoop();
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   }
 
-  /**
-   * Seeks to a position reusing the cached buffer — no network request.
-   */
   public seek(seconds: number): void {
     const target = Math.max(0, Math.min(this.duration, seconds));
-
-    if (!this.track) return;
-
-    this.pauseOffset = target;
-
-    if (this.isPlaying && this.activeBuffer && this.ctx && this.gainNode) {
-      this.playFromBuffer(target);
-    } else if (!this.isPlaying && this.onTimeUpdateCb) {
-      this.onTimeUpdateCb(target, this.duration);
-    }
+    this.audioEl.currentTime = target;
+    if (this.onTimeUpdateCb) this.onTimeUpdateCb(target, this.duration);
   }
 
   public getCurrentTime(): number {
-    if (!this.isPlaying || !this.ctx) return this.pauseOffset;
-    return Math.min(this.duration, this.ctx.currentTime - this.startTime);
+    return this.audioEl.currentTime || 0;
   }
 
   public getIsPlaying(): boolean {
-    return this.isPlaying;
+    return !this.audioEl.paused && !this.audioEl.ended;
   }
 
   public setCallbacks(
@@ -215,23 +145,55 @@ export class AudioEngine {
     this.onEndedCb = onEnded;
   }
 
-  private stopCurrent(): void {
-    if (this.currentSourceNode) {
-      try {
-        this.currentSourceNode.stop();
-        this.currentSourceNode.disconnect();
-      } catch {
-        // already stopped
-      }
-      this.currentSourceNode = null;
+  /**
+   * Подключает кнопки на экране блокировки / в шторке уведомлений
+   * (play, pause, next, previous, перемотка) к обработчикам приложения.
+   * Вызывать один раз при старте приложения.
+   */
+  public setMediaSessionHandlers(handlers: {
+    onPlay: () => void;
+    onPause: () => void;
+    onNext: () => void;
+    onPrev: () => void;
+    onSeek: (seconds: number) => void;
+  }) {
+    if (!('mediaSession' in navigator)) return;
+
+    navigator.mediaSession.setActionHandler('play', handlers.onPlay);
+    navigator.mediaSession.setActionHandler('pause', handlers.onPause);
+    navigator.mediaSession.setActionHandler('nexttrack', handlers.onNext);
+    navigator.mediaSession.setActionHandler('previoustrack', handlers.onPrev);
+
+    try {
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (typeof details.seekTime === 'number') handlers.onSeek(details.seekTime);
+      });
+    } catch {
+      // seekto поддерживается не везде — не критично, остальные кнопки работают
     }
+  }
+
+  private updateMediaSessionMetadata(track: Track) {
+    if (!('mediaSession' in navigator) || !('MediaMetadata' in window)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      artwork: track.coverUrl
+        ? [
+            { src: track.coverUrl, sizes: '96x96', type: 'image/jpeg' },
+            { src: track.coverUrl, sizes: '256x256', type: 'image/jpeg' },
+            { src: track.coverUrl, sizes: '512x512', type: 'image/jpeg' },
+          ]
+        : [],
+    });
   }
 
   private startProgressLoop() {
     this.stopProgressLoop();
     this.updateInterval = window.setInterval(() => {
-      if (this.onTimeUpdateCb && this.isPlaying) {
-        this.onTimeUpdateCb(this.getCurrentTime(), this.duration);
+      if (this.onTimeUpdateCb && !this.audioEl.paused) {
+        this.onTimeUpdateCb(this.audioEl.currentTime, this.duration);
       }
     }, 200);
   }
@@ -243,6 +205,20 @@ export class AudioEngine {
     }
   }
 
+  private async getOrCreateSynthesizedUrl(track: Track): Promise<string> {
+    const cached = this.synthesizedUrlCache.get(track.id);
+    if (cached) return cached;
+    const blob = await this.generateWavBlob(track);
+    const url = URL.createObjectURL(blob);
+    this.synthesizedUrlCache.set(track.id, url);
+    return url;
+  }
+
+  /**
+   * Генерирует процедурный AudioBuffer через Web Audio API синтез —
+   * используется как для демо-треков без реального аудиофайла, так и
+   * для генерации WAV на скачивание в офлайн-режим.
+   */
   public async generateProceduralBuffer(track: Track): Promise<AudioBuffer> {
     const sampleRate = 44100;
     const duration = Math.min(track.duration || 180, 240);
@@ -251,14 +227,15 @@ export class AudioEngine {
     const pattern = track.audioPattern || {
       tempo: 90,
       key: 'C',
-      synthStyle: 'ambient_pad' as const,
-      notes: [261.63, 329.63, 392.0, 523.25],
+      synthStyle: 'ambient_pad',
+      notes: [261.63, 329.63, 392.00, 523.25]
     };
 
     const masterGain = offlineCtx.createGain();
     masterGain.gain.setValueAtTime(0.7, 0);
     masterGain.connect(offlineCtx.destination);
 
+    // Filter node for warmth
     const filter = offlineCtx.createBiquadFilter();
     filter.type = pattern.synthStyle === 'synthwave_pulse' ? 'lowpass' : 'peaking';
     filter.frequency.setValueAtTime(1200, 0);
@@ -268,6 +245,7 @@ export class AudioEngine {
     const beatInterval = 60 / pattern.tempo;
     const notes = pattern.notes;
 
+    // Build rhythmic pattern across the track duration
     let currentTime = 0;
     let noteIdx = 0;
 
@@ -275,6 +253,7 @@ export class AudioEngine {
       const freq = notes[noteIdx % notes.length];
       const noteLength = beatInterval * (pattern.synthStyle === 'ambient_pad' ? 4 : 2);
 
+      // Main Melody/Chord Oscillator
       const osc = offlineCtx.createOscillator();
       const oscGain = offlineCtx.createGain();
 
@@ -290,6 +269,7 @@ export class AudioEngine {
 
       osc.frequency.setValueAtTime(freq, currentTime);
 
+      // ADSR Envelope
       const attack = pattern.synthStyle === 'ambient_pad' ? 0.8 : 0.05;
       const decay = 0.3;
       const sustain = 0.4;
@@ -303,25 +283,24 @@ export class AudioEngine {
 
       osc.connect(oscGain);
       oscGain.connect(filter);
+
       osc.start(currentTime);
       osc.stop(currentTime + noteLength);
 
-      if (
-        pattern.synthStyle === 'minimal_beat' ||
-        pattern.synthStyle === 'synthwave_pulse' ||
-        pattern.synthStyle === 'lofi_chill'
-      ) {
+      // Add sub-bass or rhythmic kick for beat styles
+      if (pattern.synthStyle === 'minimal_beat' || pattern.synthStyle === 'synthwave_pulse' || pattern.synthStyle === 'lofi_chill') {
         if (Math.floor(currentTime / beatInterval) % 2 === 0) {
           const kickOsc = offlineCtx.createOscillator();
           const kickGain = offlineCtx.createGain();
-
           kickOsc.frequency.setValueAtTime(150, currentTime);
           kickOsc.frequency.exponentialRampToValueAtTime(30, currentTime + 0.15);
+
           kickGain.gain.setValueAtTime(0.5, currentTime);
           kickGain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.2);
 
           kickOsc.connect(kickGain);
           kickGain.connect(masterGain);
+
           kickOsc.start(currentTime);
           kickOsc.stop(currentTime + 0.2);
         }
@@ -334,18 +313,23 @@ export class AudioEngine {
     return await offlineCtx.startRendering();
   }
 
+  /**
+   * Генерирует WAV audio blob для офлайн-кэша (IndexedDB) и для
+   * проигрывания синтезированных демо-треков через <audio>.
+   */
   public async generateWavBlob(track: Track): Promise<Blob> {
     const audioBuffer = await this.generateProceduralBuffer(track);
     return bufferToWav(audioBuffer);
   }
 }
 
+// WAV audio encoder utility
 function bufferToWav(buffer: AudioBuffer): Blob {
   const numOfChan = buffer.numberOfChannels;
   const length = buffer.length * numOfChan * 2 + 44;
   const out = new DataView(new ArrayBuffer(length));
-  const channels: Float32Array[] = [];
-  const sampleRate = buffer.sampleRate;
+  let channels = [];
+  let sampleRate = buffer.sampleRate;
   let offset = 0;
   let pos = 0;
 
@@ -365,17 +349,18 @@ function bufferToWav(buffer: AudioBuffer): Blob {
     pos += 2;
   }
 
+  // WAV Header
   writeString('RIFF');
   writeUint32(length - 8);
   writeString('WAVE');
   writeString('fmt ');
   writeUint32(16);
-  writeUint16(1);
+  writeUint16(1); // PCM
   writeUint16(numOfChan);
   writeUint32(sampleRate);
   writeUint32(sampleRate * 2 * numOfChan);
   writeUint16(numOfChan * 2);
-  writeUint16(16);
+  writeUint16(16); // 16-bit
   writeString('data');
   writeUint32(length - pos - 4);
 

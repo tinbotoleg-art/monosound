@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Home, 
   Search, 
@@ -13,9 +13,12 @@ import {
   Music2,
   Coins,
   ShieldCheck,
-  User as UserIcon
+  User as UserIcon,
+  Download
 } from 'lucide-react';
 import { ActiveTab, Playlist, User } from '../types';
+import { useInstallPrompt } from '../hooks/useInstallPrompt';
+import { InstallInstructionsModal } from './InstallInstructionsModal';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -43,6 +46,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
 }) => {
   const isAdminUser = currentUser?.email === 'tinbotoleg@gmail.com' && currentUser?.isAdmin;
+  const { canInstall, promptInstall, isIOS, isStandalone } = useInstallPrompt();
+  const [showIOSInstructions, setShowIOSInstructions] = useState(false);
+
+  const handleDownloadClick = async () => {
+    if (canInstall) {
+      await promptInstall();
+    } else if (isIOS) {
+      setShowIOSInstructions(true);
+    } else {
+      // Десктоп-браузер без поддержки нативной установки, или PWA уже
+      // установлена — просто подсказываем, где искать пункт установки.
+      alert(
+        isStandalone
+          ? 'Приложение уже установлено на этом устройстве.'
+          : 'Откройте этот сайт с телефона (Android — Chrome, iPhone — Safari), чтобы установить приложение на главный экран.'
+      );
+    }
+  };
 
   const mainNav = [
     { id: 'home', label: 'Главная', icon: Home },
@@ -113,6 +134,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           );
         })}
+
+        {/* Install / Download App */}
+        {!isStandalone && (
+          <button
+            onClick={handleDownloadClick}
+            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900/80 transition-all border border-dashed border-zinc-800 mt-1"
+          >
+            <Download className="w-4 h-4 text-zinc-400" />
+            <span>Скачать приложение</span>
+          </button>
+        )}
       </div>
 
       {/* Playlists Section */}
@@ -187,6 +219,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
       </div>
+
+      {showIOSInstructions && (
+        <InstallInstructionsModal onClose={() => setShowIOSInstructions(false)} />
+      )}
     </aside>
   );
 };
