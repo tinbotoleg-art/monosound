@@ -33,6 +33,11 @@ export class AudioEngine {
   constructor() {
     this.audioEl = new Audio();
     this.audioEl.preload = 'auto';
+    // ВАЖНО: без этого аудио с другого домена (например, Supabase Storage)
+    // "загрязняет" MediaElementAudioSourceNode — файл продолжает играть и
+    // currentTime идёт как обычно, но звук на выходе Web Audio графа
+    // (через который проходит визуализатор) браузер молча заглушает.
+    this.audioEl.crossOrigin = 'anonymous';
     // playsInline не нужен для <audio>, но не мешает; крутится в памяти,
     // в DOM элемент вставлять не обязательно.
 
