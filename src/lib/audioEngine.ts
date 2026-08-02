@@ -1,27 +1,24 @@
 import { Track } from '../types';
 
 /**
- * Почему плеер переписан на <audio>, а не остался на "чистом" Web Audio API:
+ * ВАЖНО: воспроизведение идёт ТОЛЬКО через обычный <audio>-элемент,
+ * без Web Audio API (AudioContext/AnalyserNode) в пути звука.
  *
- * Браузеры (и Android, и iOS) разрешают продолжать воспроизведение и
- * показывать элементы управления на экране блокировки ТОЛЬКО для
- * настоящих media-элементов (<audio>/<video>), связанных с
- * navigator.mediaSession. AudioBufferSourceNode "сам по себе" в фоне
- * глушится агрессивнее и не показывается на экране блокировки — именно
- * поэтому раньше это не работало вне активной вкладки.
+ * Раньше звук пропускался через createMediaElementSource → AnalyserNode
+ * (для визуализатора). Проблема: мобильные браузеры (и Android, и iOS)
+ * агрессивно приостанавливают/глушат именно AudioContext, когда вкладка
+ * свёрнута или экран заблокирован — обычный <audio>-элемент так не
+ * трогают, ему официально разрешено играть в фоне и управляться с экрана
+ * блокировки через navigator.mediaSession. Это и было причиной, почему
+ * музыка замолкала в фоне/при блокировке и "заикалась" после паузы.
  *
- * Analyser (для визуализатора) подключён поверх того же <audio>-элемента
- * через createMediaElementSource — звук по-прежнему идёт со стандартного
- * медиапайплайна браузера, а Web Audio используется только чтобы прочитать
- * частотные данные для анимации.
+ * Визуализатор при этом не ломается: getAnalyserData() ниже отдаёт
+ * "пустые" данные, а AudioVisualizer.tsx уже умеет в этом случае рисовать
+ * плавную псевдо-анимацию вместо реального спектра — визуально разница
+ * почти незаметна, а стабильность фонового звука важнее.
  */
 export class AudioEngine {
   private audioEl: HTMLAudioElement;
-  private ctx: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private gainNode: GainNode | null = null;
-  private mediaSourceNode: MediaElementAudioSourceNode | null = null;
-
   private track: Track | null = null;
   private duration = 0;
   private synthesizedUrlCache = new Map<string, string>();
@@ -33,68 +30,33 @@ export class AudioEngine {
   constructor() {
     this.audioEl = new Audio();
     this.audioEl.preload = 'auto';
-    // ВАЖНО: без этого аудио с другого домена (например, Supabase Storage)
-    // "загрязняет" MediaElementAudioSourceNode — файл продолжает играть и
-    // currentTime идёт как обычно, но звук на выходе Web Audio графа
-    // (через который проходит визуализатор) браузер молча заглушает.
-    this.audioEl.crossOrigin = 'anonymous';
-    // playsInline не нужен для <audio>, но не мешает; крутится в памяти,
-    // в DOM элемент вставлять не обязательно.
 
     this.audioEl.addEventListener('ended', () => {
       this.stopProgressLoop();
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
       if (this.onEndedCb) this.onEndedCb();
     });
-
-    // Если контекст "заснул" (частая история на мобильных при уходе в фон),
-    // будим его обратно, когда вкладка снова активна.
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && this.ctx?.state === 'suspended' && !this.audioEl.paused) {
-        this.ctx.resume();
-      }
-    });
-  }
-
-  private initContext() {
-    if (!this.ctx) {
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new AudioContextClass();
-      this.analyser = this.ctx.createAnalyser();
-      this.analyser.fftSize = 64;
-      this.gainNode = this.ctx.createGain();
-      this.mediaSourceNode = this.ctx.createMediaElementSource(this.audioEl);
-      this.mediaSourceNode.connect(this.gainNode);
-      this.gainNode.connect(this.analyser);
-      this.analyser.connect(this.ctx.destination);
-    }
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
   }
 
   public setVolume(volume: number) {
     this.audioEl.volume = Math.max(0, Math.min(1, volume));
   }
 
+  /**
+   * Реального анализа спектра больше нет (см. комментарий выше) —
+   * отдаём нулевой массив, AudioVisualizer сам подставит псевдо-анимацию.
+   */
   public getAnalyserData(): Uint8Array {
-    if (!this.analyser) return new Uint8Array(32);
-    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-    this.analyser.getByteFrequencyData(dataArray);
-    return dataArray;
+    return new Uint8Array(32);
   }
 
   public async playTrack(track: Track, startOffset = 0): Promise<void> {
-    // initContext() требует предшествующего пользовательского жеста —
-    // он у нас есть, т.к. playTrack всегда вызывается из обработчика клика.
-    this.initContext();
-
     this.track = track;
     this.duration = track.duration || 180;
 
     // Реальный загруженный файл (например, из Supabase Storage) стримится
     // напрямую по URL. Синтезированные демо-треки рендерятся в WAV один раз
-    // и играются как blob — тоже через тот же <audio>, тоже с поддержкой фона.
+    // и кэшируются по id трека, чтобы не пересчитывать их на каждый повтор.
     const src = track.audioUrl || (await this.getOrCreateSynthesizedUrl(track));
 
     if (this.audioEl.src !== src) {
@@ -105,8 +67,6 @@ export class AudioEngine {
     try {
       await this.audioEl.play();
     } catch (err) {
-      // Автовоспроизведение могло быть заблокировано браузером —
-      // в норме это не должно случаться, т.к. вызов идёт из click-хендлера.
       console.warn('[AudioEngine] play() blocked:', err);
     }
 
@@ -153,7 +113,6 @@ export class AudioEngine {
   /**
    * Подключает кнопки на экране блокировки / в шторке уведомлений
    * (play, pause, next, previous, перемотка) к обработчикам приложения.
-   * Вызывать один раз при старте приложения.
    */
   public setMediaSessionHandlers(handlers: {
     onPlay: () => void;
@@ -220,9 +179,9 @@ export class AudioEngine {
   }
 
   /**
-   * Генерирует процедурный AudioBuffer через Web Audio API синтез —
-   * используется как для демо-треков без реального аудиофайла, так и
-   * для генерации WAV на скачивание в офлайн-режим.
+   * Генерирует процедурный AudioBuffer через OfflineAudioContext — это
+   * отдельный, оффлайновый рендеринг (не связан с живым воспроизведением),
+   * поэтому background-ограничения выше его не касаются.
    */
   public async generateProceduralBuffer(track: Track): Promise<AudioBuffer> {
     const sampleRate = 44100;

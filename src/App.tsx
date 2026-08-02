@@ -241,6 +241,13 @@ export default function App() {
   }, [queue, currentTrack, repeatMode, tracks]);
 
   const playTrack = (track: Track) => {
+    // Клик по уже играющему/поставленному на паузу треку в списке должен
+    // ставить на паузу / возобновлять, а не перезапускать его с начала.
+    if (currentTrack?.id === track.id) {
+      handlePlayPause();
+      return;
+    }
+
     const todayStr = new Date().toISOString().slice(0, 10);
     let user = currentUser;
 
