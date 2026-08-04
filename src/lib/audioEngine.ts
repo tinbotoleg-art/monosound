@@ -1,4 +1,5 @@
 import { Track } from '../types';
+import { getTrackAudioBlob } from './offlineDb';
 
 /**
  * ВАЖНО: воспроизведение идёт ТОЛЬКО через обычный <audio>-элемент,
@@ -22,6 +23,7 @@ export class AudioEngine {
   private track: Track | null = null;
   private duration = 0;
   private synthesizedUrlCache = new Map<string, string>();
+  private offlineBlobUrlCache = new Map<string, string>();
 
   private onTimeUpdateCb?: (currentTime: number, duration: number) => void;
   private onEndedCb?: () => void;
@@ -57,7 +59,11 @@ export class AudioEngine {
     // Реальный загруженный файл (например, из Supabase Storage) стримится
     // напрямую по URL. Синтезированные демо-треки рендерятся в WAV один раз
     // и кэшируются по id трека, чтобы не пересчитывать их на каждый повтор.
-    const src = track.audioUrl || (await this.getOrCreateSynthesizedUrl(track));
+    // Офлайн-первым: если трек скачан (лежит в IndexedDB), играем локальную
+    // копию — это единственный способ, которым он реально проигрывается
+    // без интернета. Иначе стримим по сети (audioUrl) или, для демо-треков
+    // без файла, синтезируем на лету.
+    const src = await this.getPlaybackSrc(track);
 
     if (this.audioEl.src !== src) {
       this.audioEl.src = src;
@@ -167,6 +173,25 @@ export class AudioEngine {
       clearInterval(this.updateInterval);
       this.updateInterval = null;
     }
+  }
+
+  private async getPlaybackSrc(track: Track): Promise<string> {
+    const cachedOfflineUrl = this.offlineBlobUrlCache.get(track.id);
+    if (cachedOfflineUrl) return cachedOfflineUrl;
+
+    try {
+      const offlineBlob = await getTrackAudioBlob(track.id);
+      if (offlineBlob) {
+        const url = URL.createObjectURL(offlineBlob);
+        this.offlineBlobUrlCache.set(track.id, url);
+        return url;
+      }
+    } catch {
+      // Трек не скачан офлайн (или IndexedDB недоступна) — идём дальше
+    }
+
+    if (track.audioUrl) return track.audioUrl;
+    return this.getOrCreateSynthesizedUrl(track);
   }
 
   private async getOrCreateSynthesizedUrl(track: Track): Promise<string> {
