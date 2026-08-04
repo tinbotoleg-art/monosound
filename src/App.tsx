@@ -95,6 +95,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(!navigator.onLine);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Audio Player State
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -658,6 +659,8 @@ export default function App() {
           onToggleOfflineMode={() => setIsOfflineMode(!isOfflineMode)}
           downloadedCount={downloadedCount}
           currentUser={currentUser}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
         />
 
         {/* Main Content Pane */}
@@ -673,9 +676,10 @@ export default function App() {
             downloadedCount={downloadedCount}
             currentUser={currentUser}
             onOpenAuth={() => setIsAuthModalOpen(true)}
+            onOpenSidebar={() => setIsSidebarOpen(true)}
           />
 
-          <main className="flex-1 overflow-y-auto p-6 space-y-8 max-w-7xl w-full mx-auto">
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8 max-w-7xl w-full mx-auto">
             {/* View Switching */}
             {selectedPlaylistId ? (
               <PlaylistsView
@@ -697,12 +701,12 @@ export default function App() {
             ) : activeTab === 'home' ? (
               <div className="space-y-8">
                 {/* Minimal Banner */}
-                <div className="p-8 bg-black border border-zinc-800 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
+                <div className="p-5 sm:p-8 bg-black border border-zinc-800 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
                   <div className="space-y-3 z-10 max-w-xl">
                     <span className="text-[10px] font-mono uppercase text-zinc-400 tracking-widest px-2.5 py-1 bg-zinc-900 border border-zinc-800 rounded-full">
                       Монохромная Аудио Среда
                     </span>
-                    <h1 className="text-3xl font-extrabold tracking-tight text-white">
+                    <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
                       Минимализм. Звук. Автономия.
                     </h1>
                     <p className="text-xs text-zinc-400 leading-relaxed">
@@ -719,7 +723,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="w-28 h-28 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0 shadow-inner">
+                  <div className="hidden sm:flex w-28 h-28 rounded-2xl bg-zinc-900 border border-zinc-800 items-center justify-center shrink-0 shadow-inner">
                     <Disc className="w-14 h-14 text-white animate-spin-slow" />
                   </div>
                 </div>

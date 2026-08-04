@@ -22,7 +22,7 @@ export const QueueDrawer: React.FC<QueueDrawerProps> = ({
   onClose,
 }) => {
   return (
-    <div className="fixed right-0 top-16 bottom-20 w-80 bg-black/95 border-l border-zinc-800 backdrop-blur-xl z-40 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
+    <div className="fixed right-0 top-16 bottom-20 w-full sm:w-80 bg-black/95 border-l border-zinc-800 backdrop-blur-xl z-40 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
       {/* Drawer Header */}
       <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
         <div className="flex items-center space-x-2">

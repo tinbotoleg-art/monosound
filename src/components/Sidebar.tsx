@@ -14,7 +14,8 @@ import {
   Coins,
   ShieldCheck,
   User as UserIcon,
-  Download
+  Download,
+  X
 } from 'lucide-react';
 import { ActiveTab, Playlist, User } from '../types';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
@@ -31,6 +32,8 @@ interface SidebarProps {
   onToggleOfflineMode: () => void;
   downloadedCount: number;
   currentUser?: User | null;
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -44,6 +47,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleOfflineMode,
   downloadedCount,
   currentUser,
+  isOpen,
+  onClose,
 }) => {
   const isAdminUser = currentUser?.email === 'tinbotoleg@gmail.com' && currentUser?.isAdmin;
   const { canInstall, promptInstall, isIOS, isStandalone } = useInstallPrompt();
@@ -78,11 +83,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-64 bg-black border-r border-zinc-800/80 flex flex-col h-full select-none shrink-0">
+    <>
+      {/* Mobile backdrop — tap to close */}
+      {isOpen && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-30 lg:hidden"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-72 sm:w-64
+          bg-black border-r border-zinc-800/80 flex flex-col h-full select-none
+          transform transition-transform duration-200 ease-in-out
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+          lg:static lg:translate-x-0 lg:z-0 lg:w-64 lg:shrink-0`}
+      >
       {/* Brand Logo Header */}
       <div className="p-6 border-b border-zinc-800/80 flex items-center justify-between">
         <div 
-          onClick={() => setActiveTab('home')}
+          onClick={() => { setActiveTab('home'); onClose(); }}
           className="flex items-center space-x-3 cursor-pointer group"
         >
           <div className="w-9 h-9 rounded-md bg-white text-black flex items-center justify-center font-bold text-lg shadow-md group-hover:scale-105 transition-transform">
@@ -97,6 +117,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </p>
           </div>
         </div>
+
+        {/* Mobile-only close button */}
+        <button
+          onClick={onClose}
+          className="lg:hidden p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-900 transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Main Navigation */}
@@ -113,6 +141,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => {
                 onSelectPlaylist('');
                 setActiveTab(item.id as ActiveTab);
+                onClose();
               }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
                 isActive
@@ -138,7 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Install / Download App */}
         {!isStandalone && (
           <button
-            onClick={handleDownloadClick}
+            onClick={() => { handleDownloadClick(); onClose(); }}
             className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900/80 transition-all border border-dashed border-zinc-800 mt-1"
           >
             <Download className="w-4 h-4 text-zinc-400" />
@@ -170,7 +199,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               return (
                 <button
                   key={playlist.id}
-                  onClick={() => onSelectPlaylist(playlist.id)}
+                  onClick={() => { onSelectPlaylist(playlist.id); onClose(); }}
                   className={`w-full text-left px-3 py-2 rounded-lg text-xs truncate transition-all flex items-center space-x-2.5 ${
                     isSelected
                       ? 'bg-zinc-800 text-white font-medium border border-zinc-700'
@@ -223,6 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {showIOSInstructions && (
         <InstallInstructionsModal onClose={() => setShowIOSInstructions(false)} />
       )}
-    </aside>
+      </aside>
+    </>
   );
 };
