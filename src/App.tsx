@@ -109,19 +109,6 @@ export default function App() {
   const [queue, setQueue] = useState<Track[]>([]);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
 
-  // Load offline downloaded state from IndexedDB on startup
-  useEffect(() => {
-    getDownloadedTracks().then((records) => {
-      const downloadedIds = new Set(records.map((r) => r.track.id));
-      setTracks((prev) =>
-        prev.map((t) => ({
-          ...t,
-          isDownloaded: downloadedIds.has(t.id),
-        }))
-      );
-    }).catch(err => console.warn('IndexedDB load warning:', err));
-  }, []);
-
   // Restore/track the real Supabase Auth session and keep currentUser in
   // sync with it (login, logout, token refresh — all flow through here).
   useEffect(() => {
@@ -159,18 +146,42 @@ export default function App() {
   // ones, and the admin gets literally everything (needed for /admin).
   // Refetch whenever the logged-in identity changes so switching to the
   // admin account immediately reveals the moderation queue.
+  //
+  // Offline (IndexedDB) status is re-applied to the WHOLE merged list here
+  // too — not just once on mount — otherwise every refetch from Supabase
+  // would silently reset "downloaded" tracks back to "not downloaded"
+  // (this was the bug: only the built-in demo tracks kept their offline
+  // flag across refreshes, uploaded/remote tracks always lost it).
   useEffect(() => {
     if (isAuthLoading) return;
     let cancelled = false;
 
-    fetchTracks().then((remoteTracks) => {
+    async function loadAndMergeTracks() {
+      const [remoteTracks, downloadedRecords] = await Promise.all([
+        fetchTracks(),
+        getDownloadedTracks().catch((err) => {
+          console.warn('IndexedDB load warning:', err);
+          return [];
+        }),
+      ]);
       if (cancelled) return;
+
       const localIds = new Set(INITIAL_TRACKS.map((t) => t.id));
+      const downloadedById = new Map(downloadedRecords.map((r) => [r.track.id, r]));
+
       setTracks((prev) => {
         const preservedLocalDemo = prev.filter((t) => localIds.has(t.id));
-        return [...preservedLocalDemo, ...remoteTracks];
+        const merged = [...preservedLocalDemo, ...remoteTracks];
+        return merged.map((t) => {
+          const record = downloadedById.get(t.id);
+          return record
+            ? { ...t, isDownloaded: true, downloadedAt: record.downloadedAt }
+            : { ...t, isDownloaded: false };
+        });
       });
-    });
+    }
+
+    loadAndMergeTracks();
 
     return () => {
       cancelled = true;
@@ -567,8 +578,12 @@ export default function App() {
         prev.map((t) => (t.id === track.id ? { ...t, isDownloaded: false } : t))
       );
     } else {
-      // Generate WAV Audio Blob for IndexedDB caching
-      const audioBlob = await globalAudioEngine.generateWavBlob(track);
+      // Реальный загруженный трек — кэшируем настоящий аудиофайл, а не
+      // сгенерированный синтетический паттерн (раньше офлайн-копия всегда
+      // была синтезированной, даже для треков с настоящим аудио).
+      const audioBlob = track.audioUrl
+        ? await fetch(track.audioUrl).then((res) => res.blob())
+        : await globalAudioEngine.generateWavBlob(track);
       await saveTrackOffline(track, audioBlob);
       setTracks((prev) =>
         prev.map((t) => (t.id === track.id ? { ...t, isDownloaded: true, downloadedAt: Date.now() } : t))

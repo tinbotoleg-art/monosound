@@ -64,20 +64,20 @@ export const TrackList: React.FC<TrackListProps> = ({
             {subtitle && <p className="text-xs text-zinc-400 mt-0.5">{subtitle}</p>}
           </div>
 
-          <div className="flex items-center space-x-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 overflow-x-auto sm:overflow-visible -mx-1 px-1 sm:mx-0 sm:px-0">
             {tracks.length > 0 && (
               <>
                 <button
                   onClick={() => onPlayAll(sortedTracks, false)}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-md transition-colors"
+                  className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-md transition-colors shrink-0"
                 >
                   <Play className="w-3.5 h-3.5 fill-black" />
-                  <span>Слушать все</span>
+                  <span className="hidden sm:inline">Слушать все</span>
                 </button>
 
                 <button
                   onClick={() => onPlayAll(sortedTracks, true)}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 text-xs font-medium rounded-md transition-colors"
+                  className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 text-xs font-medium rounded-md transition-colors shrink-0"
                   title="Перемешать"
                 >
                   <Shuffle className="w-3.5 h-3.5" />
@@ -86,7 +86,7 @@ export const TrackList: React.FC<TrackListProps> = ({
 
                 <button
                   onClick={handleDownloadAll}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 text-xs font-medium rounded-md transition-colors"
+                  className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 text-xs font-medium rounded-md transition-colors shrink-0"
                   title="Скачать все треки списка"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -94,13 +94,13 @@ export const TrackList: React.FC<TrackListProps> = ({
                 </button>
 
                 {/* Sort selector */}
-                <div className="relative inline-block">
+                <div className="relative inline-block shrink-0">
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value as any)}
-                    className="bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-md px-2.5 py-1.5 appearance-none pr-6 cursor-pointer hover:border-zinc-700 focus:outline-none"
+                    className="bg-zinc-900 border border-zinc-800 text-zinc-400 text-[11px] sm:text-xs rounded-md pl-2.5 pr-6 py-1.5 appearance-none cursor-pointer hover:border-zinc-700 focus:outline-none max-w-[110px] sm:max-w-none"
                   >
-                    <option value="default">Сортировка: По умолчанию</option>
+                    <option value="default">Сорт: по умолч.</option>
                     <option value="title">По названию</option>
                     <option value="artist">По исполнителю</option>
                     <option value="genre">По жанру</option>
