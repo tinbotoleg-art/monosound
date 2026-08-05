@@ -1,14 +1,15 @@
 import React from 'react';
-import { Lock, Sparkles, Check, X, ShieldAlert } from 'lucide-react';
+import { Sparkles, Check, X, ShieldAlert } from 'lucide-react';
+import { SUBSCRIPTION_STARS_PRICE } from '../lib/subscription';
 
 interface SubscriptionLimitModalProps {
   onClose: () => void;
-  onActivateSubscription: () => void;
+  onGoToSubscribe: () => void;
 }
 
 export const SubscriptionLimitModal: React.FC<SubscriptionLimitModalProps> = ({
   onClose,
-  onActivateSubscription,
+  onGoToSubscribe,
 }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
@@ -40,7 +41,7 @@ export const SubscriptionLimitModal: React.FC<SubscriptionLimitModalProps> = ({
         <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
             <span className="text-sm font-bold text-white">MonoSound Премиум</span>
-            <span className="text-sm font-bold text-white">59 ₽ / мес</span>
+            <span className="text-sm font-bold text-white">{SUBSCRIPTION_STARS_PRICE} ⭐ / мес</span>
           </div>
           <ul className="space-y-2 text-xs text-zinc-300">
             <li className="flex items-center space-x-2">
@@ -57,7 +58,7 @@ export const SubscriptionLimitModal: React.FC<SubscriptionLimitModalProps> = ({
             </li>
             <li className="flex items-center space-x-2">
               <Check className="w-3.5 h-3.5 text-white shrink-0" />
-              <span>Отмена подписки в любой момент в 1 клик</span>
+              <span>Оплата звёздами Telegram, отмена в любой момент</span>
             </li>
           </ul>
         </div>
@@ -65,13 +66,13 @@ export const SubscriptionLimitModal: React.FC<SubscriptionLimitModalProps> = ({
         <div className="space-y-2">
           <button
             onClick={() => {
-              onActivateSubscription();
+              onGoToSubscribe();
               onClose();
             }}
             className="w-full py-3 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors shadow-md flex items-center justify-center space-x-2"
           >
             <Sparkles className="w-4 h-4 fill-black" />
-            <span>Подключить за 59 ₽ / месяц</span>
+            <span>Оформить за {SUBSCRIPTION_STARS_PRICE} ⭐</span>
           </button>
           <button
             onClick={onClose}

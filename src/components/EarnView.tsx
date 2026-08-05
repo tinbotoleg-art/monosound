@@ -186,7 +186,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
             Зарабатывайте на своей музыке
           </h2>
           <p className="text-xs text-zinc-400 leading-relaxed max-w-2xl">
-            MonoSound работает по прозрачной модели распределения доходов: пользователи оплачивают подписку <strong className="text-white">59 ₽ в месяц</strong>. Каждое прослушивание вашего трека подписчиками приносит прямые финансовые отчисления в ваш авторский кабинет.
+            MonoSound работает по прозрачной модели распределения доходов: пользователи оплачивают подписку <strong className="text-white">50 ⭐ в месяц</strong> (Telegram Stars). Каждое прослушивание вашего трека подписчиками приносит прямые финансовые отчисления в ваш авторский кабинет.
           </p>
 
           {/* Quick Stats Dashboard */}
@@ -415,7 +415,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
             <div className="space-y-3 text-xs text-zinc-400">
               <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg space-y-1">
-                <p className="text-white font-semibold">1. Фонд подписок 59 ₽/мес</p>
+                <p className="text-white font-semibold">1. Фонд подписок 50 ⭐/мес</p>
                 <p className="text-[11px]">
                   Каждый подписчик формирует общий призовой пул платформы.
                 </p>

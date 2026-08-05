@@ -76,7 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'playlists', label: 'Плейлисты', icon: ListMusic },
     { id: 'recommendations', label: 'AI Рекомендации', icon: Sparkles },
     { id: 'earn', label: 'Заработать', icon: Coins, highlight: true },
-    { id: 'profile', label: 'Профиль / Подписка', icon: UserIcon, badge: currentUser?.isSubscribed ? '59 ₽' : undefined },
+    { id: 'profile', label: 'Профиль / Подписка', icon: UserIcon, badge: currentUser?.isSubscribed ? '50 ⭐' : undefined },
     { id: 'offline', label: 'Офлайн Центр', icon: HardDriveDownload, badge: downloadedCount > 0 ? downloadedCount : undefined },
     { id: 'liked', label: 'Избранное', icon: Heart },
     ...(isAdminUser ? [{ id: 'admin', label: 'Модерация', icon: ShieldCheck, badge: 'Админ' }] : []),

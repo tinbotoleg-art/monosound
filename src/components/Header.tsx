@@ -115,7 +115,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden sm:inline max-w-[100px] truncate">{currentUser.name}</span>
             {currentUser.isSubscribed && (
               <span className="hidden sm:inline px-1.5 py-0.2 bg-white text-black font-mono font-bold text-[9px] rounded-full">
-                59 ₽
+                50 ⭐
               </span>
             )}
           </button>

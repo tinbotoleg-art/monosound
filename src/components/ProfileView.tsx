@@ -1,25 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   User as UserIcon, 
-  CreditCard, 
   Sparkles, 
   Check, 
   X, 
   LogOut, 
   ShieldCheck, 
   Coins, 
-  Calendar,
-  Zap,
   Lock,
-  ArrowRight
+  ArrowRight,
+  Send,
+  Loader2
 } from 'lucide-react';
 import { User } from '../types';
+import { getSubscribeDeepLink, SUBSCRIPTION_STARS_PRICE, cancelMySubscription } from '../lib/subscription';
 
 interface ProfileViewProps {
   currentUser: User | null;
   onOpenAuth: () => void;
   onLogout: () => void;
-  onToggleSubscription: (activate: boolean) => void;
+  onSubscriptionCancelled: () => void;
   onNavigateToEarn: () => void;
 }
 
@@ -27,23 +27,31 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   currentUser,
   onOpenAuth,
   onLogout,
-  onToggleSubscription,
+  onSubscriptionCancelled,
   onNavigateToEarn,
 }) => {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [passwordSentMsg, setPasswordSentMsg] = useState<{ email: string; pwd: string } | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
-  const handleChangePassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-    let newPwd = 'Ms-';
-    for (let i = 0; i < 6; i++) {
-      newPwd += chars.charAt(Math.floor(Math.random() * chars.length));
+  // Как только вебхук после реальной оплаты активирует подписку в базе,
+  // currentUser.isSubscribed обновится через Supabase Realtime (см. App.tsx)
+  // — закрываем модалку оплаты автоматически, без участия пользователя.
+  useEffect(() => {
+    if (currentUser?.isSubscribed) {
+      setIsPaymentModalOpen(false);
     }
+  }, [currentUser?.isSubscribed]);
 
-    if (currentUser?.email) {
-      localStorage.setItem(`monosound_pwd_${currentUser.email.trim().toLowerCase()}`, newPwd);
-      setPasswordSentMsg({ email: currentUser.email, pwd: newPwd });
+  const handleCancelSubscription = async () => {
+    setIsCancelling(true);
+    try {
+      await cancelMySubscription();
+      onSubscriptionCancelled();
+    } catch (err) {
+      console.error('Cancel subscription failed:', err);
+      alert('Не удалось отключить подписку. Попробуйте ещё раз.');
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -57,7 +65,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <div className="space-y-2">
           <h2 className="text-2xl font-bold text-white tracking-tight">Личный Кабинет MonoSound</h2>
           <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mx-auto">
-            Авторизуйтесь в системе для управления премиум-подпиской (59 ₽/мес), отслеживания дневных лимитов и загрузки собственной музыки.
+            Авторизуйтесь в системе для управления премиум-подпиской ({SUBSCRIPTION_STARS_PRICE} ⭐/мес), отслеживания дневных лимитов и загрузки собственной музыки.
           </p>
         </div>
 
@@ -75,15 +83,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const isSubscribed = currentUser.isSubscribed;
   const todayPlays = currentUser.dailyPlaysCount || 0;
   const remainingPlays = Math.max(0, 10 - todayPlays);
-
-  const handleConfirmPayment = () => {
-    setPaymentSuccess(true);
-    setTimeout(() => {
-      onToggleSubscription(true);
-      setPaymentSuccess(false);
-      setIsPaymentModalOpen(false);
-    }, 1800);
-  };
+  const deepLink = getSubscribeDeepLink(currentUser.id);
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
@@ -128,7 +128,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               Подписка MonoSound Премиум
             </h3>
           </div>
-          <span className="text-sm font-mono font-extrabold text-white">59 ₽ / месяц</span>
+          <span className="text-sm font-mono font-extrabold text-white">{SUBSCRIPTION_STARS_PRICE} ⭐ / месяц</span>
         </div>
 
         {isSubscribed ? (
@@ -142,7 +142,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </p>
                 {currentUser.subscriptionExpiresAt && (
                   <p className="text-[11px] font-mono text-zinc-500 mt-2">
-                    Следующее списание: {new Date(currentUser.subscriptionExpiresAt).toLocaleDateString('ru-RU')} (59 ₽)
+                    Действует до: {new Date(currentUser.subscriptionExpiresAt).toLocaleDateString('ru-RU')}
                   </p>
                 )}
               </div>
@@ -150,10 +150,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
             <div className="pt-2 flex justify-end">
               <button
-                onClick={() => onToggleSubscription(false)}
-                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white text-xs font-medium rounded-lg transition-colors"
+                onClick={handleCancelSubscription}
+                disabled={isCancelling}
+                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
               >
-                Отключить подписку
+                {isCancelling && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Отключить подписку</span>
               </button>
             </div>
           </div>
@@ -180,7 +182,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="space-y-1">
                 <h4 className="text-sm font-bold text-white">Полный доступ ко всей медиатеке</h4>
-                <p className="text-xs text-zinc-400">Слушайте без рекламы, скачивайте в offline и создавайте свои треки.</p>
+                <p className="text-xs text-zinc-400">Слушайте без ограничений, скачивайте в offline и создавайте свои треки.</p>
               </div>
 
               <button
@@ -188,7 +190,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 className="px-5 py-2.5 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-lg shrink-0 transition-colors shadow-md flex items-center space-x-2"
               >
                 <Sparkles className="w-4 h-4 fill-black" />
-                <span>Активировать за 59 ₽ / мес</span>
+                <span>Оформить за {SUBSCRIPTION_STARS_PRICE} ⭐</span>
               </button>
             </div>
           </div>
@@ -216,53 +218,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
       </div>
 
-      {/* Security & Password Reset Section */}
+      {/* Security Section */}
       <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-white flex items-center space-x-2">
-              <Lock className="w-4 h-4 text-white" />
-              <span>Безопасность и сброс пароля</span>
-            </h3>
-            <p className="text-xs text-zinc-400">
-              Сгенерировать и выслать новый случайный пароль на вашу почту ({currentUser.email}).
-            </p>
-          </div>
-
-          <button
-            onClick={handleChangePassword}
-            className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 hover:text-white text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2"
-          >
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <span>Сменить пароль по почте</span>
-          </button>
+        <div className="flex items-center space-x-2">
+          <Lock className="w-4 h-4 text-white" />
+          <h3 className="text-base font-bold text-white">Безопасность</h3>
         </div>
-
-        {passwordSentMsg && (
-          <div className="p-4 bg-emerald-950/70 border border-emerald-800 rounded-xl space-y-2 text-xs text-emerald-200 animate-fade-in">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-white flex items-center space-x-1.5">
-                <Check className="w-4 h-4 text-emerald-400" />
-                <span>Письмо отправлено на {passwordSentMsg.email}!</span>
-              </span>
-              <button
-                onClick={() => setPasswordSentMsg(null)}
-                className="p-1 text-zinc-400 hover:text-white"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <p className="text-emerald-300 font-mono text-[11px]">
-              Новый сгенерированный пароль: <strong className="text-white text-sm bg-black/40 px-2 py-0.5 rounded border border-emerald-700">{passwordSentMsg.pwd}</strong>
-            </p>
-            <p className="text-[11px] text-emerald-400/80">
-              Вы можете использовать этот пароль при следующем входе в систему.
-            </p>
-          </div>
-        )}
+        <p className="text-xs text-zinc-400">
+          Смена пароля — через ссылку восстановления на email со страницы входа
+          («Забыли пароль?»).
+        </p>
       </div>
 
-      {/* Payment Activation Modal */}
+      {/* Telegram Stars Payment Modal */}
       {isPaymentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
           <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl p-6 space-y-6 shadow-2xl relative">
@@ -274,53 +242,39 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
 
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-white">Оформление подписки MonoSound</h3>
-              <p className="text-xs text-zinc-400">Стоимость: 59 ₽ / месяц (автопродление)</p>
+              <h3 className="text-lg font-bold text-white">Оплата через Telegram</h3>
+              <p className="text-xs text-zinc-400">{SUBSCRIPTION_STARS_PRICE} ⭐ Telegram Stars — 1 месяц подписки</p>
             </div>
 
-            {paymentSuccess ? (
-              <div className="p-4 bg-emerald-950/60 border border-emerald-800 text-emerald-200 text-xs rounded-xl flex items-center space-x-3">
-                <Check className="w-5 h-5 text-emerald-400 shrink-0" />
-                <span>Оплата провайдера прошла успешно! Премиум подписка активирована.</span>
+            <div className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-3 text-xs text-zinc-300">
+              <div className="flex items-center space-x-2">
+                <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shrink-0">1</span>
+                <span>Нажмите кнопку ниже — откроется Telegram и чат с нашим ботом</span>
               </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between text-xs text-zinc-300">
-                    <span>Тариф:</span>
-                    <span className="font-bold text-white">Полный доступ (Безлимит)</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs text-zinc-300">
-                    <span>Период:</span>
-                    <span className="font-mono text-white">1 месяц</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs border-t border-zinc-800 pt-2 font-bold text-white">
-                    <span>К оплате:</span>
-                    <span>59 ₽</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[11px] font-mono text-zinc-400 uppercase">Способ оплаты</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button className="p-3 bg-zinc-900 border border-white text-white text-xs rounded-lg font-medium text-left flex items-center justify-between">
-                      <span>Банковская карта</span>
-                      <CreditCard className="w-4 h-4" />
-                    </button>
-                    <button className="p-3 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-medium text-left">
-                      <span>СБП (Быстрый платеж)</span>
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleConfirmPayment}
-                  className="w-full py-3.5 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors shadow-md"
-                >
-                  Оплатить 59 ₽ и включить Премиум
-                </button>
+              <div className="flex items-center space-x-2">
+                <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shrink-0">2</span>
+                <span>Бот пришлёт счёт на {SUBSCRIPTION_STARS_PRICE} ⭐ — подтвердите оплату</span>
               </div>
-            )}
+              <div className="flex items-center space-x-2">
+                <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shrink-0">3</span>
+                <span>Вернитесь на сайт — подписка активируется автоматически, эта страница обновится сама</span>
+              </div>
+            </div>
+
+            <a
+              href={deepLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-3.5 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors shadow-md flex items-center justify-center space-x-2"
+            >
+              <Send className="w-4 h-4" />
+              <span>Открыть Telegram и оплатить {SUBSCRIPTION_STARS_PRICE} ⭐</span>
+            </a>
+
+            <p className="text-[11px] text-zinc-500 text-center flex items-center justify-center space-x-1.5">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>Ожидаем подтверждение оплаты...</span>
+            </p>
           </div>
         </div>
       )}

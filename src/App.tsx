@@ -17,6 +17,7 @@ import { globalAudioEngine } from './lib/audioEngine';
 import { syncUserProfile } from './lib/recommendationEngine';
 import { supabase } from './lib/supabaseClient';
 import { fetchTracks, submitTrack, approveTrackRemote, rejectTrackRemote } from './lib/tracksApi';
+import { fetchProfile, subscribeToProfileChanges } from './lib/subscription';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -25,6 +26,7 @@ import { QueueDrawer } from './components/QueueDrawer';
 import { CreatePlaylistModal } from './components/CreatePlaylistModal';
 import { AuthModal } from './components/AuthModal';
 import { SubscriptionLimitModal } from './components/SubscriptionLimitModal';
+import { SubscriptionRequiredModal } from './components/SubscriptionRequiredModal';
 
 import { TrackList } from './components/TrackList';
 import { SearchView } from './components/SearchView';
@@ -76,6 +78,7 @@ export default function App() {
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSubscriptionLimitModalOpen, setIsSubscriptionLimitModalOpen] = useState(false);
+  const [isSubscriptionRequiredModalOpen, setIsSubscriptionRequiredModalOpen] = useState(false);
 
   const [preferenceProfile, setPreferenceProfile] = useState<PreferenceProfile>(() => {
     const saved = localStorage.getItem('monosound_preferences');
@@ -111,6 +114,9 @@ export default function App() {
 
   // Restore/track the real Supabase Auth session and keep currentUser in
   // sync with it (login, logout, token refresh — all flow through here).
+  // Subscription status is now read from public.profiles (real DB state,
+  // only ever flipped to true by the Telegram webhook after a real
+  // payment) instead of being guessed/faked locally.
   useEffect(() => {
     function buildAppUser(supabaseUser: { id: string; email?: string | null; user_metadata?: any }): User {
       const email = (supabaseUser.email || '').trim().toLowerCase();
@@ -129,17 +135,54 @@ export default function App() {
       };
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      setCurrentUser(data.session?.user ? buildAppUser(data.session.user) : null);
+    async function resolveUser(sessionUser: any | null): Promise<User | null> {
+      if (!sessionUser) return null;
+      const baseUser = buildAppUser(sessionUser);
+      if (baseUser.isAdmin) return baseUser; // админ всегда с полным доступом, без реальной подписки
+
+      const profile = await fetchProfile(baseUser.id);
+      return {
+        ...baseUser,
+        isSubscribed: profile?.is_subscribed ?? false,
+        subscriptionExpiresAt: profile?.subscription_expires_at
+          ? new Date(profile.subscription_expires_at).getTime()
+          : null,
+      };
+    }
+
+    supabase.auth.getSession().then(async ({ data }) => {
+      const user = await resolveUser(data.session?.user ?? null);
+      setCurrentUser(user);
       setIsAuthLoading(false);
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-      setCurrentUser(session?.user ? buildAppUser(session.user) : null);
+      resolveUser(session?.user ?? null).then(setCurrentUser);
     });
 
     return () => subscription.subscription.unsubscribe();
   }, []);
+
+  // Слушаем изменения профиля в реальном времени — как только вебхук
+  // Telegram активирует подписку после оплаты, сайт узнаёт об этом сам,
+  // без перезагрузки страницы.
+  useEffect(() => {
+    if (!currentUser?.id || currentUser.isAdmin) return;
+    const unsubscribe = subscribeToProfileChanges(currentUser.id, (profile) => {
+      setCurrentUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              isSubscribed: profile.is_subscribed,
+              subscriptionExpiresAt: profile.subscription_expires_at
+                ? new Date(profile.subscription_expires_at).getTime()
+                : null,
+            }
+          : prev
+      );
+    });
+    return unsubscribe;
+  }, [currentUser?.id, currentUser?.isAdmin]);
 
   // Load tracks from Supabase. RLS decides what comes back: everyone gets
   // 'approved' tracks, the uploader also gets their own pending/rejected
@@ -348,20 +391,22 @@ export default function App() {
     setTracks((prev) => [created, ...prev]);
   };
 
-  const handleToggleSubscription = (activate: boolean) => {
-    if (!currentUser) return;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    setCurrentUser((prev) =>
-      prev
-        ? {
-            ...prev,
-            isSubscribed: activate,
-            subscriptionExpiresAt: activate ? Date.now() + 30 * 24 * 60 * 60 * 1000 : null,
-            dailyPlaysCount: activate ? 0 : prev.dailyPlaysCount,
-            lastPlayDate: todayStr,
-          }
-        : null
-    );
+  // Отмена подписки идёт через RPC cancel_my_subscription (см. ProfileView) —
+  // это единственное, что клиент вправе делать сам. Здесь просто отражаем
+  // результат локально (Realtime тоже это подтвердит отдельным событием).
+  const handleSubscriptionCancelled = () => {
+    setCurrentUser((prev) => (prev ? { ...prev, isSubscribed: false, subscriptionExpiresAt: null } : prev));
+  };
+
+  // Активация подписки больше НЕ происходит на клиенте — только через
+  // реальную оплату звёздами в Telegram (см. ProfileView + вебхук).
+  // Эта функция лишь открывает экран, откуда пользователь может её начать.
+  const goToSubscriptionFlow = () => {
+    if (currentUser) {
+      setActiveTab('profile');
+    } else {
+      setIsAuthModalOpen(true);
+    }
   };
 
   const handlePlayPause = () => {
@@ -577,18 +622,25 @@ export default function App() {
       setTracks((prev) =>
         prev.map((t) => (t.id === track.id ? { ...t, isDownloaded: false } : t))
       );
-    } else {
-      // Реальный загруженный трек — кэшируем настоящий аудиофайл, а не
-      // сгенерированный синтетический паттерн (раньше офлайн-копия всегда
-      // была синтезированной, даже для треков с настоящим аудио).
-      const audioBlob = track.audioUrl
-        ? await fetch(track.audioUrl).then((res) => res.blob())
-        : await globalAudioEngine.generateWavBlob(track);
-      await saveTrackOffline(track, audioBlob);
-      setTracks((prev) =>
-        prev.map((t) => (t.id === track.id ? { ...t, isDownloaded: true, downloadedAt: Date.now() } : t))
-      );
+      return;
     }
+
+    // Офлайн-скачивание — только для подписчиков.
+    if (!currentUser?.isSubscribed) {
+      setIsSubscriptionRequiredModalOpen(true);
+      return;
+    }
+
+    // Реальный загруженный трек — кэшируем настоящий аудиофайл, а не
+    // сгенерированный синтетический паттерн (раньше офлайн-копия всегда
+    // была синтезированной, даже для треков с настоящим аудио).
+    const audioBlob = track.audioUrl
+      ? await fetch(track.audioUrl).then((res) => res.blob())
+      : await globalAudioEngine.generateWavBlob(track);
+    await saveTrackOffline(track, audioBlob);
+    setTracks((prev) =>
+      prev.map((t) => (t.id === track.id ? { ...t, isDownloaded: true, downloadedAt: Date.now() } : t))
+    );
   };
 
   const handleCreatePlaylist = (newP: { title: string; description: string; trackIds: string[] }) => {
@@ -875,7 +927,7 @@ export default function App() {
                 currentUser={currentUser}
                 onOpenAuth={() => setIsAuthModalOpen(true)}
                 onLogout={() => supabase.auth.signOut()}
-                onToggleSubscription={handleToggleSubscription}
+                onSubscriptionCancelled={handleSubscriptionCancelled}
                 onNavigateToEarn={() => setActiveTab('earn')}
               />
             ) : activeTab === 'admin' ? (
@@ -976,7 +1028,11 @@ export default function App() {
       {isAuthModalOpen && (
         <AuthModal
           onClose={() => setIsAuthModalOpen(false)}
-          onLoginSuccess={(u) => setCurrentUser(u)}
+          onLoginSuccess={() => {
+            // Реальный currentUser (с подпиской из profiles) подхватится
+            // эффектом onAuthStateChange выше — не задаём его здесь заново,
+            // чтобы не мигнуть неверным статусом подписки.
+          }}
         />
       )}
 
@@ -984,12 +1040,17 @@ export default function App() {
       {isSubscriptionLimitModalOpen && (
         <SubscriptionLimitModal
           onClose={() => setIsSubscriptionLimitModalOpen(false)}
-          onActivateSubscription={() => {
-            if (currentUser) {
-              handleToggleSubscription(true);
-            } else {
-              setIsAuthModalOpen(true);
-            }
+          onGoToSubscribe={goToSubscriptionFlow}
+        />
+      )}
+
+      {/* Offline downloads require an active subscription */}
+      {isSubscriptionRequiredModalOpen && (
+        <SubscriptionRequiredModal
+          onClose={() => setIsSubscriptionRequiredModalOpen(false)}
+          onSubscribeClick={() => {
+            setIsSubscriptionRequiredModalOpen(false);
+            goToSubscriptionFlow();
           }}
         />
       )}
