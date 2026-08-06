@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Track, 
   Playlist, 
@@ -6,6 +6,7 @@ import {
   PreferenceProfile,
   User
 } from './types';
+import { INITIAL_TRACKS, INITIAL_PLAYLISTS } from './data/initialTracks';
 import { 
   getDownloadedTracks, 
   saveTrackOffline, 
@@ -17,6 +18,7 @@ import { syncUserProfile } from './lib/recommendationEngine';
 import { supabase } from './lib/supabaseClient';
 import { fetchTracks, submitTrack, approveTrackRemote, rejectTrackRemote } from './lib/tracksApi';
 import { fetchProfile, subscribeToProfileChanges } from './lib/subscription';
+import { fetchMyLikedTrackIds, likeTrackRemote, unlikeTrackRemote } from './lib/likesApi';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -56,11 +58,11 @@ export default function App() {
   // Треки, загруженные пользователями, подгружаются из Supabase отдельным
   // эффектом ниже (см. loadRemoteTracks) — единый источник правды для
   // модерации, а не localStorage конкретного браузера.
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
 
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {
     const saved = localStorage.getItem('monosound_playlists');
-    return saved ? JSON.parse(saved) : [];
+    return saved ? JSON.parse(saved) : INITIAL_PLAYLISTS;
   });
 
   // currentUser отражает реальную сессию Supabase Auth (см. useEffect ниже
@@ -84,13 +86,22 @@ export default function App() {
     return saved
       ? JSON.parse(saved)
       : {
-          likedTrackIds: [],
+          likedTrackIds: INITIAL_TRACKS.filter(t => t.isLiked).map(t => t.id),
           history: [],
           favoriteGenres: { 'Lo-fi / Ambient / Chillout': 35, 'Electronic / EDM': 10 },
           favoriteArtists: {},
           totalTimeListenedSeconds: 0,
         };
   });
+
+  // Позволяет асинхронному эффекту подгрузки треков (ниже) читать самые
+  // свежие likedTrackIds/dislikedTrackIds в момент пересборки списка, не
+  // делая при этом сам preferenceProfile зависимостью эффекта (иначе он
+  // бы дёргал повторный fetch треков с Supabase на каждый лайк).
+  const preferenceProfileRef = useRef(preferenceProfile);
+  useEffect(() => {
+    preferenceProfileRef.current = preferenceProfile;
+  }, [preferenceProfile]);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
@@ -183,6 +194,32 @@ export default function App() {
     return unsubscribe;
   }, [currentUser?.id, currentUser?.isAdmin]);
 
+  // При входе подтягиваем реальную историю лайков этого пользователя из
+  // Supabase (нужно для нового устройства/браузера, где localStorage пуст)
+  // и объединяем с тем, что уже есть локально. Патчим tracks напрямую
+  // (не только preferenceProfile), чтобы не зависеть от порядка выполнения
+  // относительно эффекта загрузки треков выше.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let cancelled = false;
+
+    fetchMyLikedTrackIds(currentUser.id).then((serverLikedIds) => {
+      if (cancelled || serverLikedIds.length === 0) return;
+      const serverLikedSet = new Set(serverLikedIds);
+
+      setPreferenceProfile((prev) => ({
+        ...prev,
+        likedTrackIds: Array.from(new Set([...prev.likedTrackIds, ...serverLikedIds])),
+      }));
+
+      setTracks((prev) => prev.map((t) => (serverLikedSet.has(t.id) ? { ...t, isLiked: true } : t)));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
+
   // Load tracks from Supabase. RLS decides what comes back: everyone gets
   // 'approved' tracks, the uploader also gets their own pending/rejected
   // ones, and the admin gets literally everything (needed for /admin).
@@ -194,6 +231,11 @@ export default function App() {
   // would silently reset "downloaded" tracks back to "not downloaded"
   // (this was the bug: only the built-in demo tracks kept their offline
   // flag across refreshes, uploaded/remote tracks always lost it).
+  //
+  // Тем же способом чинится и другой баг: isLiked/isDisliked у трека тоже
+  // сбрасывались при каждой пересборке списка (Supabase не знает о лайках
+  // конкретного пользователя — likesCount это общий счётчик, а не флаг
+  // "лайкнул ли Я"). Восстанавливаем их из preferenceProfile.
   useEffect(() => {
     if (isAuthLoading) return;
     let cancelled = false;
@@ -208,17 +250,27 @@ export default function App() {
       ]);
       if (cancelled) return;
 
+      const localIds = new Set(INITIAL_TRACKS.map((t) => t.id));
       const downloadedById = new Map(downloadedRecords.map((r) => [r.track.id, r]));
+      const { likedTrackIds = [], dislikedTrackIds = [] } = preferenceProfileRef.current;
+      const likedSet = new Set(likedTrackIds);
+      const dislikedSet = new Set(dislikedTrackIds);
 
-      setTracks(
-        remoteTracks.map((t) => {
+      setTracks((prev) => {
+        const preservedLocalDemo = prev.filter((t) => localIds.has(t.id));
+        const merged = [...preservedLocalDemo, ...remoteTracks];
+        return merged.map((t) => {
           const record = downloadedById.get(t.id);
-          return record
-            ? { ...t, isDownloaded: true, downloadedAt: record.downloadedAt }
-            : { ...t, isDownloaded: false };
-        })
-      );
-    };
+          return {
+            ...t,
+            isDownloaded: !!record,
+            downloadedAt: record ? record.downloadedAt : undefined,
+            isLiked: likedSet.has(t.id),
+            isDisliked: dislikedSet.has(t.id),
+          };
+        });
+      });
+    }
 
     loadAndMergeTracks();
 
@@ -488,6 +540,12 @@ export default function App() {
   };
 
   const handleToggleLike = (trackId: string) => {
+    // Считаем направление переключения один раз здесь — используется и для
+    // локального обновления, и для записи в Supabase (реальный лайк по
+    // пользователю, а не просто localStorage — отсюда и общий рейтинг).
+    const current = tracks.find((t) => t.id === trackId);
+    const willBeLiked = !current?.isLiked;
+
     setTracks((prev) =>
       prev.map((t) => {
         if (t.id === trackId) {
@@ -531,6 +589,21 @@ export default function App() {
         return p;
       })
     );
+
+    // Реальная запись лайка по пользователю в Supabase — только для
+    // авторизованных (гостям лайки остаются локальными в этом браузере,
+    // как и раньше). likes_count в базе обновляется триггером автоматически.
+    if (currentUser) {
+      if (willBeLiked) {
+        likeTrackRemote(currentUser.id, trackId).catch((err) =>
+          console.warn('Failed to sync like:', err)
+        );
+      } else {
+        unlikeTrackRemote(currentUser.id, trackId).catch((err) =>
+          console.warn('Failed to sync unlike:', err)
+        );
+      }
+    }
   };
 
   const handleToggleDislike = (trackId: string) => {
