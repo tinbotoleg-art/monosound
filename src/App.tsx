@@ -54,6 +54,10 @@ function getOrCreateGuestId(): string {
 export default function App() {
   // Main State
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>(() => {
+    const saved = localStorage.getItem('monosound_playlists');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // currentUser отражает реальную сессию Supabase Auth (см. useEffect ниже
   // с onAuthStateChange) — это то, что видит RLS на сервере, поэтому
