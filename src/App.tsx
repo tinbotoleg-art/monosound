@@ -6,7 +6,6 @@ import {
   PreferenceProfile,
   User
 } from './types';
-import { INITIAL_TRACKS, INITIAL_PLAYLISTS } from './data/initialTracks';
 import { 
   getDownloadedTracks, 
   saveTrackOffline, 
@@ -57,11 +56,11 @@ export default function App() {
   // Треки, загруженные пользователями, подгружаются из Supabase отдельным
   // эффектом ниже (см. loadRemoteTracks) — единый источник правды для
   // модерации, а не localStorage конкретного браузера.
-  const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
+  const [tracks, setTracks] = useState<Track[]>([]);
 
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {
     const saved = localStorage.getItem('monosound_playlists');
-    return saved ? JSON.parse(saved) : INITIAL_PLAYLISTS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   // currentUser отражает реальную сессию Supabase Auth (см. useEffect ниже
@@ -85,7 +84,7 @@ export default function App() {
     return saved
       ? JSON.parse(saved)
       : {
-          likedTrackIds: INITIAL_TRACKS.filter(t => t.isLiked).map(t => t.id),
+          likedTrackIds: [],
           history: [],
           favoriteGenres: { 'Lo-fi / Ambient / Chillout': 35, 'Electronic / EDM': 10 },
           favoriteArtists: {},
@@ -209,20 +208,17 @@ export default function App() {
       ]);
       if (cancelled) return;
 
-      const localIds = new Set(INITIAL_TRACKS.map((t) => t.id));
       const downloadedById = new Map(downloadedRecords.map((r) => [r.track.id, r]));
 
-      setTracks((prev) => {
-        const preservedLocalDemo = prev.filter((t) => localIds.has(t.id));
-        const merged = [...preservedLocalDemo, ...remoteTracks];
-        return merged.map((t) => {
+      setTracks(
+        remoteTracks.map((t) => {
           const record = downloadedById.get(t.id);
           return record
             ? { ...t, isDownloaded: true, downloadedAt: record.downloadedAt }
             : { ...t, isDownloaded: false };
-        });
-      });
-    }
+        })
+      );
+    };
 
     loadAndMergeTracks();
 
