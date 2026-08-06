@@ -6,7 +6,6 @@ import {
   PreferenceProfile,
   User
 } from './types';
-import { INITIAL_TRACKS, INITIAL_PLAYLISTS } from './data/initialTracks';
 import { 
   getDownloadedTracks, 
   saveTrackOffline, 
@@ -54,16 +53,7 @@ function getOrCreateGuestId(): string {
 
 export default function App() {
   // Main State
-  // INITIAL_TRACKS — встроенный демо-каталог, всегда виден всем.
-  // Треки, загруженные пользователями, подгружаются из Supabase отдельным
-  // эффектом ниже (см. loadRemoteTracks) — единый источник правды для
-  // модерации, а не localStorage конкретного браузера.
-  const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
-
-  const [playlists, setPlaylists] = useState<Playlist[]>(() => {
-    const saved = localStorage.getItem('monosound_playlists');
-    return saved ? JSON.parse(saved) : INITIAL_PLAYLISTS;
-  });
+  const [tracks, setTracks] = useState<Track[]>([]);
 
   // currentUser отражает реальную сессию Supabase Auth (см. useEffect ниже
   // с onAuthStateChange) — это то, что видит RLS на сервере, поэтому
@@ -86,7 +76,7 @@ export default function App() {
     return saved
       ? JSON.parse(saved)
       : {
-          likedTrackIds: INITIAL_TRACKS.filter(t => t.isLiked).map(t => t.id),
+          likedTrackIds: [],
           history: [],
           favoriteGenres: { 'Lo-fi / Ambient / Chillout': 35, 'Electronic / EDM': 10 },
           favoriteArtists: {},
@@ -250,15 +240,14 @@ export default function App() {
       ]);
       if (cancelled) return;
 
-      const localIds = new Set(INITIAL_TRACKS.map((t) => t.id));
+      const localIds = new Set<string>();
       const downloadedById = new Map(downloadedRecords.map((r) => [r.track.id, r]));
       const { likedTrackIds = [], dislikedTrackIds = [] } = preferenceProfileRef.current;
       const likedSet = new Set(likedTrackIds);
       const dislikedSet = new Set(dislikedTrackIds);
 
       setTracks((prev) => {
-        const preservedLocalDemo = prev.filter((t) => localIds.has(t.id));
-        const merged = [...preservedLocalDemo, ...remoteTracks];
+        const merged = remoteTracks;
         return merged.map((t) => {
           const record = downloadedById.get(t.id);
           return {
