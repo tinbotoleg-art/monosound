@@ -539,46 +539,63 @@ export default function App() {
     }
   };
 
-  const handleToggleLike = (trackId: string) => {
-    // Считаем направление переключения один раз здесь — используется и для
-    // локального обновления, и для записи в Supabase (реальный лайк по
-    // пользователю, а не просто localStorage — отсюда и общий рейтинг).
+  const handleToggleLike = async (trackId: string) => {
     const current = tracks.find((t) => t.id === trackId);
     const willBeLiked = !current?.isLiked;
-
+  
+    console.log('[LIKE CLICK]', {
+      trackId,
+      willBeLiked,
+      currentUser
+    });
+  
     setTracks((prev) =>
       prev.map((t) => {
         if (t.id === trackId) {
           const nextLiked = !t.isLiked;
-          let nextLikesCount = t.likesCount !== undefined ? t.likesCount : (t.isLiked ? 1 : 0);
+          let nextLikesCount =
+            t.likesCount !== undefined ? t.likesCount : (t.isLiked ? 1 : 0);
+  
           let nextDisliked = t.isDisliked;
-
+  
           if (nextLiked) {
             nextLikesCount += 1;
             nextDisliked = false;
+  
             setPreferenceProfile((p) => ({
               ...p,
               likedTrackIds: Array.from(new Set([...p.likedTrackIds, trackId])),
-              dislikedTrackIds: (p.dislikedTrackIds || []).filter((id) => id !== trackId),
+              dislikedTrackIds: (p.dislikedTrackIds || []).filter(
+                (id) => id !== trackId
+              ),
             }));
           } else {
             nextLikesCount = Math.max(0, nextLikesCount - 1);
+  
             setPreferenceProfile((p) => ({
               ...p,
               likedTrackIds: p.likedTrackIds.filter((id) => id !== trackId),
             }));
           }
-          return { ...t, isLiked: nextLiked, isDisliked: nextDisliked, likesCount: nextLikesCount };
+  
+          return {
+            ...t,
+            isLiked: nextLiked,
+            isDisliked: nextDisliked,
+            likesCount: nextLikesCount,
+          };
         }
+  
         return t;
       })
     );
-
-    // Sync system 'Избранные треки' playlist
+  
+  
     setPlaylists((prev) =>
       prev.map((p) => {
         if (p.id === 'playlist-liked') {
           const isPresent = p.trackIds.includes(trackId);
+  
           return {
             ...p,
             trackIds: isPresent
@@ -586,23 +603,45 @@ export default function App() {
               : [...p.trackIds, trackId],
           };
         }
+  
         return p;
       })
     );
-
-    // Реальная запись лайка по пользователю в Supabase — только для
-    // авторизованных (гостям лайки остаются локальными в этом браузере,
-    // как и раньше). likes_count в базе обновляется триггером автоматически.
-    if (currentUser) {
+  
+  
+    // ===== SUPABASE LIKE SYNC =====
+  
+    if (!currentUser?.id) {
+      console.warn('[LIKE] No authenticated user, skipping remote save');
+      return;
+    }
+  
+  
+    try {
       if (willBeLiked) {
-        likeTrackRemote(currentUser.id, trackId).catch((err) =>
-          console.warn('Failed to sync like:', err)
-        );
+        console.log('[LIKE] Saving to Supabase', {
+          user: currentUser.id,
+          track: trackId
+        });
+  
+        await likeTrackRemote(currentUser.id, trackId);
+  
+        console.log('[LIKE] Saved successfully');
+  
       } else {
-        unlikeTrackRemote(currentUser.id, trackId).catch((err) =>
-          console.warn('Failed to sync unlike:', err)
-        );
+  
+        console.log('[UNLIKE] Removing from Supabase', {
+          user: currentUser.id,
+          track: trackId
+        });
+  
+        await unlikeTrackRemote(currentUser.id, trackId);
+  
+        console.log('[UNLIKE] Removed successfully');
       }
+  
+    } catch (err) {
+      console.error('[LIKE ERROR]', err);
     }
   };
 

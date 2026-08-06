@@ -15,16 +15,40 @@ export async function fetchMyLikedTrackIds(userId: string): Promise<string[]> {
 }
 
 export async function likeTrackRemote(userId: string, trackId: string): Promise<void> {
-  const { error } = await supabase.from('track_likes').insert({ user_id: userId, track_id: trackId });
-  // 23505 = unique_violation — трек уже лайкнут (например, двойной клик), не считаем ошибкой
+  console.log('[likesApi] saving like', {
+    userId,
+    trackId
+  });
+
+  const { error } = await supabase
+    .from('track_likes')
+    .insert({
+      user_id: userId,
+      track_id: trackId
+    });
+
+  // 23505 = лайк уже существует, это не критичная ошибка
   if (error && error.code !== '23505') {
-    console.warn('[likesApi] likeTrackRemote failed:', error.message);
+    console.error('[likesApi] likeTrackRemote failed:', error);
+    throw error;
   }
 }
 
+
 export async function unlikeTrackRemote(userId: string, trackId: string): Promise<void> {
-  const { error } = await supabase.from('track_likes').delete().eq('user_id', userId).eq('track_id', trackId);
+  console.log('[likesApi] removing like', {
+    userId,
+    trackId
+  });
+
+  const { error } = await supabase
+    .from('track_likes')
+    .delete()
+    .eq('user_id', userId)
+    .eq('track_id', trackId);
+
   if (error) {
-    console.warn('[likesApi] unlikeTrackRemote failed:', error.message);
+    console.error('[likesApi] unlikeTrackRemote failed:', error);
+    throw error;
   }
 }
