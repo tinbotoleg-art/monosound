@@ -6,6 +6,7 @@ import {
   PreferenceProfile,
   User
 } from './types';
+import { INITIAL_TRACKS, INITIAL_PLAYLISTS } from './data/initialTracks';
 import { 
   getDownloadedTracks, 
   saveTrackOffline, 
@@ -18,6 +19,7 @@ import { supabase } from './lib/supabaseClient';
 import { fetchTracks, submitTrack, approveTrackRemote, rejectTrackRemote } from './lib/tracksApi';
 import { fetchProfile, subscribeToProfileChanges } from './lib/subscription';
 import { fetchMyLikedTrackIds, likeTrackRemote, unlikeTrackRemote } from './lib/likesApi';
+import { incrementTrackPlays } from './lib/earningsApi';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -53,10 +55,15 @@ function getOrCreateGuestId(): string {
 
 export default function App() {
   // Main State
-  const [tracks, setTracks] = useState<Track[]>([]);
+  // INITIAL_TRACKS — встроенный демо-каталог, всегда виден всем.
+  // Треки, загруженные пользователями, подгружаются из Supabase отдельным
+  // эффектом ниже (см. loadRemoteTracks) — единый источник правды для
+  // модерации, а не localStorage конкретного браузера.
+  const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
+
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {
     const saved = localStorage.getItem('monosound_playlists');
-    return saved ? JSON.parse(saved) : [];
+    return saved ? JSON.parse(saved) : INITIAL_PLAYLISTS;
   });
 
   // currentUser отражает реальную сессию Supabase Auth (см. useEffect ниже
@@ -80,7 +87,7 @@ export default function App() {
     return saved
       ? JSON.parse(saved)
       : {
-          likedTrackIds: [],
+          likedTrackIds: INITIAL_TRACKS.filter(t => t.isLiked).map(t => t.id),
           history: [],
           favoriteGenres: { 'Lo-fi / Ambient / Chillout': 35, 'Electronic / EDM': 10 },
           favoriteArtists: {},
@@ -244,14 +251,15 @@ export default function App() {
       ]);
       if (cancelled) return;
 
-      const localIds = new Set<string>();
+      const localIds = new Set(INITIAL_TRACKS.map((t) => t.id));
       const downloadedById = new Map(downloadedRecords.map((r) => [r.track.id, r]));
       const { likedTrackIds = [], dislikedTrackIds = [] } = preferenceProfileRef.current;
       const likedSet = new Set(likedTrackIds);
       const dislikedSet = new Set(dislikedTrackIds);
 
       setTracks((prev) => {
-        const merged = remoteTracks;
+        const preservedLocalDemo = prev.filter((t) => localIds.has(t.id));
+        const merged = [...preservedLocalDemo, ...remoteTracks];
         return merged.map((t) => {
           const record = downloadedById.get(t.id);
           return {
@@ -383,21 +391,17 @@ export default function App() {
 
     globalAudioEngine.playTrack(track, 0);
 
-    // Update play stats & artist earnings (0.10 RUB per play)
+    // Локальный оптимистичный "+1" — для мгновенной реакции интерфейса
+    // (например, чарт "ТОП по лайкам/прослушиваниям"). Реальный источник
+    // истины для заработка — play_count в Supabase, пишем его отдельным
+    // RPC-вызовом ниже: без этого прослушивания нигде не сохранялись и
+    // баланс в "Заработать" никогда не рос после перезагрузки страницы.
     setTracks((prev) =>
-      prev.map((t) => {
-        if (t.id === track.id) {
-          const newPlayCount = t.playCount + 1;
-          const newEarnings = (t.earningsCount || 0) + 0.10;
-          return { ...t, playCount: newPlayCount, earningsCount: newEarnings, lastPlayedAt: Date.now() };
-        }
-        return t;
-      })
+      prev.map((t) =>
+        t.id === track.id ? { ...t, playCount: t.playCount + 1, lastPlayedAt: Date.now() } : t
+      )
     );
-
-    if (currentUser && track.uploadedBy && (track.uploadedBy === currentUser.email || track.uploadedBy === currentUser.id)) {
-      setCurrentUser((prev) => prev ? { ...prev, artistEarnings: prev.artistEarnings + 0.10 } : prev);
-    }
+    incrementTrackPlays(track.id);
 
     setPreferenceProfile((prev) => {
       const currentGenreScore = prev.favoriteGenres[track.genre] || 0;
@@ -532,63 +536,46 @@ export default function App() {
     }
   };
 
-  const handleToggleLike = async (trackId: string) => {
+  const handleToggleLike = (trackId: string) => {
+    // Считаем направление переключения один раз здесь — используется и для
+    // локального обновления, и для записи в Supabase (реальный лайк по
+    // пользователю, а не просто localStorage — отсюда и общий рейтинг).
     const current = tracks.find((t) => t.id === trackId);
     const willBeLiked = !current?.isLiked;
-  
-    console.log('[LIKE CLICK]', {
-      trackId,
-      willBeLiked,
-      currentUser
-    });
-  
+
     setTracks((prev) =>
       prev.map((t) => {
         if (t.id === trackId) {
           const nextLiked = !t.isLiked;
-          let nextLikesCount =
-            t.likesCount !== undefined ? t.likesCount : (t.isLiked ? 1 : 0);
-  
+          let nextLikesCount = t.likesCount !== undefined ? t.likesCount : (t.isLiked ? 1 : 0);
           let nextDisliked = t.isDisliked;
-  
+
           if (nextLiked) {
             nextLikesCount += 1;
             nextDisliked = false;
-  
             setPreferenceProfile((p) => ({
               ...p,
               likedTrackIds: Array.from(new Set([...p.likedTrackIds, trackId])),
-              dislikedTrackIds: (p.dislikedTrackIds || []).filter(
-                (id) => id !== trackId
-              ),
+              dislikedTrackIds: (p.dislikedTrackIds || []).filter((id) => id !== trackId),
             }));
           } else {
             nextLikesCount = Math.max(0, nextLikesCount - 1);
-  
             setPreferenceProfile((p) => ({
               ...p,
               likedTrackIds: p.likedTrackIds.filter((id) => id !== trackId),
             }));
           }
-  
-          return {
-            ...t,
-            isLiked: nextLiked,
-            isDisliked: nextDisliked,
-            likesCount: nextLikesCount,
-          };
+          return { ...t, isLiked: nextLiked, isDisliked: nextDisliked, likesCount: nextLikesCount };
         }
-  
         return t;
       })
     );
-  
-  
+
+    // Sync system 'Избранные треки' playlist
     setPlaylists((prev) =>
       prev.map((p) => {
         if (p.id === 'playlist-liked') {
           const isPresent = p.trackIds.includes(trackId);
-  
           return {
             ...p,
             trackIds: isPresent
@@ -596,45 +583,23 @@ export default function App() {
               : [...p.trackIds, trackId],
           };
         }
-  
         return p;
       })
     );
-  
-  
-    // ===== SUPABASE LIKE SYNC =====
-  
-    if (!currentUser?.id) {
-      console.warn('[LIKE] No authenticated user, skipping remote save');
-      return;
-    }
-  
-  
-    try {
+
+    // Реальная запись лайка по пользователю в Supabase — только для
+    // авторизованных (гостям лайки остаются локальными в этом браузере,
+    // как и раньше). likes_count в базе обновляется триггером автоматически.
+    if (currentUser) {
       if (willBeLiked) {
-        console.log('[LIKE] Saving to Supabase', {
-          user: currentUser.id,
-          track: trackId
-        });
-  
-        await likeTrackRemote(currentUser.id, trackId);
-  
-        console.log('[LIKE] Saved successfully');
-  
+        likeTrackRemote(currentUser.id, trackId).catch((err) =>
+          console.warn('Failed to sync like:', err)
+        );
       } else {
-  
-        console.log('[UNLIKE] Removing from Supabase', {
-          user: currentUser.id,
-          track: trackId
-        });
-  
-        await unlikeTrackRemote(currentUser.id, trackId);
-  
-        console.log('[UNLIKE] Removed successfully');
+        unlikeTrackRemote(currentUser.id, trackId).catch((err) =>
+          console.warn('Failed to sync unlike:', err)
+        );
       }
-  
-    } catch (err) {
-      console.error('[LIKE ERROR]', err);
     }
   };
 

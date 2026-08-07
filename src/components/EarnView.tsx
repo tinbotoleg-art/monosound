@@ -1,20 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Upload, 
   Coins, 
   Music, 
-  DollarSign, 
   TrendingUp, 
   Check, 
   Play, 
   Sparkles, 
-  CreditCard, 
+  Send,
   X, 
   AlertCircle,
-  Volume2
+  Volume2,
+  Clock,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 import { Track, Genre, User } from '../types';
 import { uploadAudioFile, uploadCoverFile } from '../lib/tracksApi';
+import {
+  EARNINGS_PER_PLAY_STARS,
+  MIN_WITHDRAWAL_STARS,
+  WithdrawalRequest,
+  fetchMyWithdrawalRequests,
+  requestWithdrawal,
+  subscribeToMyWithdrawals,
+} from '../lib/earningsApi';
 
 interface EarnViewProps {
   currentUser: User | null;
@@ -43,6 +53,24 @@ const GENRES: Genre[] = [
   'Phonk / Synthwave / Retro'
 ];
 
+const STATUS_LABELS: Record<WithdrawalRequest['status'], { label: string; icon: React.ReactNode; className: string }> = {
+  pending: {
+    label: 'В обработке',
+    icon: <Clock className="w-3 h-3" />,
+    className: 'bg-amber-950/80 text-amber-300 border-amber-800',
+  },
+  paid: {
+    label: 'Выплачено',
+    icon: <CheckCircle2 className="w-3 h-3" />,
+    className: 'bg-emerald-950/80 text-emerald-300 border-emerald-800',
+  },
+  rejected: {
+    label: 'Отклонено',
+    icon: <XCircle className="w-3 h-3" />,
+    className: 'bg-red-950/80 text-red-300 border-red-800',
+  },
+};
+
 export const EarnView: React.FC<EarnViewProps> = ({
   currentUser,
   uploadedTracks,
@@ -63,13 +91,18 @@ export const EarnView: React.FC<EarnViewProps> = ({
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [uploadedAudioFileName, setUploadedAudioFileName] = useState('');
   const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [audioPreviewUrl, setAudioPreviewUrl] = useState('');
   const [isSuccessMessage, setIsSuccessMessage] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+
+  // Withdrawal state
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
-  const [withdrawCard, setWithdrawCard] = useState('');
+  const [withdrawTelegramUsername, setWithdrawTelegramUsername] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawError, setWithdrawError] = useState('');
+  const [isWithdrawSubmitting, setIsWithdrawSubmitting] = useState(false);
   const [withdrawSuccess, setWithdrawSuccess] = useState(false);
+  const [myWithdrawals, setMyWithdrawals] = useState<WithdrawalRequest[]>([]);
 
   // Filter user's tracks
   const myTracks = uploadedTracks.filter(
@@ -77,16 +110,28 @@ export const EarnView: React.FC<EarnViewProps> = ({
   );
 
   const totalPlaysOnMyTracks = myTracks.reduce((acc, t) => acc + (t.playCount || 0), 0);
-  const calculatedEarnings = (totalPlaysOnMyTracks * 0.10) + (currentUser?.artistEarnings || 0);
+  const totalEarnedStars = totalPlaysOnMyTracks * EARNINGS_PER_PLAY_STARS;
+  const claimedStars = myWithdrawals
+    .filter((w) => w.status === 'pending' || w.status === 'paid')
+    .reduce((acc, w) => acc + w.amount_stars, 0);
+  const availableStars = Math.max(0, totalEarnedStars - claimedStars);
+
+  // Load withdrawal history + live-update on status change (e.g. admin marks "paid")
+  useEffect(() => {
+    if (!currentUser) return;
+    fetchMyWithdrawalRequests(currentUser.id).then(setMyWithdrawals);
+
+    const unsubscribe = subscribeToMyWithdrawals(currentUser.id, (updated) => {
+      setMyWithdrawals((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+    });
+    return unsubscribe;
+  }, [currentUser?.id]);
 
   const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setAudioFile(file);
       setUploadedAudioFileName(file.name);
-      // Локальный предпросмотр в этой вкладке; реальный файл уйдёт в
-      // Supabase Storage только при отправке формы.
-      setAudioPreviewUrl(URL.createObjectURL(file));
     }
   };
 
@@ -101,7 +146,6 @@ export const EarnView: React.FC<EarnViewProps> = ({
   const handleSubmitTrack = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !artist.trim()) return;
-
     if (!currentUser) {
       onOpenAuth();
       return;
@@ -119,8 +163,6 @@ export const EarnView: React.FC<EarnViewProps> = ({
       ];
       const randomCover = defaultCovers[Math.floor(Math.random() * defaultCovers.length)];
 
-      // Реально загружаем файлы в Supabase Storage — только после этого
-      // трек попадёт в общую базу и будет виден модератору.
       const finalAudioUrl = audioFile ? await uploadAudioFile(audioFile) : undefined;
       const finalCoverUrl = coverFile ? await uploadCoverFile(coverFile) : randomCover;
 
@@ -148,7 +190,6 @@ export const EarnView: React.FC<EarnViewProps> = ({
       setTitle('');
       setUploadedAudioFileName('');
       setAudioFile(null);
-      setAudioPreviewUrl('');
       setCoverFile(null);
       setCoverUrl('');
       setTimeout(() => setIsSuccessMessage(false), 4000);
@@ -162,15 +203,41 @@ export const EarnView: React.FC<EarnViewProps> = ({
     }
   };
 
-  const handleWithdrawSubmit = (e: React.FormEvent) => {
+  const handleWithdrawSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!withdrawCard) return;
-    setWithdrawSuccess(true);
-    setTimeout(() => {
-      setWithdrawSuccess(false);
-      setIsWithdrawModalOpen(false);
-      setWithdrawCard('');
-    }, 2500);
+    setWithdrawError('');
+
+    const amount = parseFloat(withdrawAmount);
+    if (!withdrawTelegramUsername.trim()) {
+      setWithdrawError('Укажите ваш Telegram username');
+      return;
+    }
+    if (isNaN(amount) || amount < MIN_WITHDRAWAL_STARS) {
+      setWithdrawError(`Минимальная сумма для вывода — ${MIN_WITHDRAWAL_STARS} ⭐`);
+      return;
+    }
+    if (amount > availableStars) {
+      setWithdrawError(`Недостаточно звёзд. Доступно: ${availableStars.toFixed(2)} ⭐`);
+      return;
+    }
+
+    setIsWithdrawSubmitting(true);
+    try {
+      await requestWithdrawal(amount, withdrawTelegramUsername.trim());
+      setWithdrawSuccess(true);
+      if (currentUser) {
+        fetchMyWithdrawalRequests(currentUser.id).then(setMyWithdrawals);
+      }
+      setTimeout(() => {
+        setWithdrawSuccess(false);
+        setIsWithdrawModalOpen(false);
+        setWithdrawAmount('');
+      }, 2200);
+    } catch (err: any) {
+      setWithdrawError(err?.message || 'Не удалось создать заявку. Попробуйте ещё раз.');
+    } finally {
+      setIsWithdrawSubmitting(false);
+    }
   };
 
   return (
@@ -186,7 +253,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
             Зарабатывайте на своей музыке
           </h2>
           <p className="text-xs text-zinc-400 leading-relaxed max-w-2xl">
-            MonoSound работает по прозрачной модели распределения доходов: пользователи оплачивают подписку <strong className="text-white">50 ⭐ в месяц</strong> (Telegram Stars). Каждое прослушивание вашего трека подписчиками приносит прямые финансовые отчисления в ваш авторский кабинет.
+            MonoSound работает по прозрачной модели распределения доходов: пользователи оплачивают подписку <strong className="text-white">50 ⭐ в месяц</strong> (Telegram Stars). Каждое прослушивание вашего трека приносит начисление на баланс, который можно вывести звёздами через бота.
           </p>
 
           {/* Quick Stats Dashboard */}
@@ -194,8 +261,8 @@ export const EarnView: React.FC<EarnViewProps> = ({
             <div className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-1">
               <span className="text-[10px] font-mono uppercase text-zinc-500">Баланс к выплате</span>
               <div className="flex items-baseline justify-between">
-                <p className="text-xl font-extrabold text-white">{calculatedEarnings.toFixed(2)} ₽</p>
-                {calculatedEarnings > 0 && (
+                <p className="text-xl font-extrabold text-white">{availableStars.toFixed(2)} ⭐</p>
+                {availableStars >= MIN_WITHDRAWAL_STARS && (
                   <button
                     onClick={() => setIsWithdrawModalOpen(true)}
                     className="text-[11px] font-semibold text-white hover:underline"
@@ -204,6 +271,9 @@ export const EarnView: React.FC<EarnViewProps> = ({
                   </button>
                 )}
               </div>
+              {availableStars > 0 && availableStars < MIN_WITHDRAWAL_STARS && (
+                <p className="text-[10px] text-zinc-500">Минимум для вывода — {MIN_WITHDRAWAL_STARS} ⭐</p>
+              )}
             </div>
 
             <div className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-1">
@@ -424,18 +494,42 @@ export const EarnView: React.FC<EarnViewProps> = ({
               <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg space-y-1">
                 <p className="text-white font-semibold">2. Прямые выплаты за прослушивание</p>
                 <p className="text-[11px]">
-                  За каждый прослушанный трек вам начисляется ставка 10 копеек (0,10 ₽ за стрим).
+                  За каждый прослушанный трек вам начисляется {EARNINGS_PER_PLAY_STARS.toFixed(2)} ⭐.
                 </p>
               </div>
 
               <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg space-y-1">
-                <p className="text-white font-semibold">3. Мгновенный вывод средств</p>
+                <p className="text-white font-semibold">3. Вывод звёздами через бота</p>
                 <p className="text-[11px]">
-                  Выводите накопленные роялти на любую банковскую карту или по СБП в любое время.
+                  От {MIN_WITHDRAWAL_STARS} ⭐ за раз. Заявка обрабатывается вручную — звёзды переводятся на ваш Telegram-аккаунт из кошелька платформы.
                 </p>
               </div>
             </div>
           </div>
+
+          {/* Withdrawal History */}
+          {currentUser && myWithdrawals.length > 0 && (
+            <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-xl space-y-3">
+              <h3 className="text-sm font-bold text-white tracking-tight">Заявки на вывод</h3>
+              <div className="space-y-2">
+                {myWithdrawals.map((w) => {
+                  const status = STATUS_LABELS[w.status];
+                  return (
+                    <div key={w.id} className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-white">{w.amount_stars.toFixed(2)} ⭐</p>
+                        <p className="text-[10px] text-zinc-500 font-mono">@{w.telegram_username}</p>
+                      </div>
+                      <span className={`inline-flex items-center space-x-1 px-2 py-0.5 text-[10px] font-mono border rounded-full ${status.className}`}>
+                        {status.icon}
+                        <span>{status.label}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* User's Uploaded Tracks List */}
           <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-xl space-y-4">
@@ -492,7 +586,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
                     <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
                       <span className="text-xs font-mono font-bold text-emerald-400">
-                        +{(t.playCount * 0.10).toFixed(2)} ₽
+                        +{(t.playCount * EARNINGS_PER_PLAY_STARS).toFixed(2)} ⭐
                       </span>
                       <button
                         onClick={() => onPlayTrack(t)}
@@ -522,39 +616,64 @@ export const EarnView: React.FC<EarnViewProps> = ({
             </button>
 
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-white">Вывод авторских роялти</h3>
-              <p className="text-xs text-zinc-400">Сумма к зачислению: {calculatedEarnings.toFixed(2)} ₽</p>
+              <h3 className="text-lg font-bold text-white">Вывод звёзд</h3>
+              <p className="text-xs text-zinc-400">Доступно к выводу: {availableStars.toFixed(2)} ⭐ (минимум {MIN_WITHDRAWAL_STARS} ⭐)</p>
             </div>
 
             {withdrawSuccess ? (
               <div className="p-4 bg-emerald-950/60 border border-emerald-800 text-emerald-200 text-xs rounded-xl flex items-center space-x-3">
                 <Check className="w-5 h-5 text-emerald-400 shrink-0" />
-                <span>Заявка на перевод {calculatedEarnings.toFixed(2)} ₽ успешно отправлена! Средства поступят в течение нескольких минут.</span>
+                <span>Заявка отправлена! Мы вручную переведём звёзды на ваш Telegram-аккаунт в ближайшее время.</span>
               </div>
             ) : (
               <form onSubmit={handleWithdrawSubmit} className="space-y-4">
+                {withdrawError && (
+                  <div className="p-3 bg-red-950/50 border border-red-800 text-red-300 text-xs rounded-lg">
+                    {withdrawError}
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-mono text-zinc-400 uppercase">
-                    Номер карты или телефона для СБП
+                    Ваш Telegram username
                   </label>
                   <div className="relative">
-                    <CreditCard className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
+                    <Send className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
                     <input
                       type="text"
                       required
-                      value={withdrawCard}
-                      onChange={(e) => setWithdrawCard(e.target.value)}
-                      placeholder="2200 •••• •••• 1234 или +7 (900) •••-••-••"
+                      value={withdrawTelegramUsername}
+                      onChange={(e) => setWithdrawTelegramUsername(e.target.value.replace(/^@/, ''))}
+                      placeholder="username (без @)"
                       className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:border-zinc-600"
                     />
                   </div>
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase">
+                    Сумма (⭐)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={MIN_WITHDRAWAL_STARS}
+                    max={availableStars}
+                    step={0.01}
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                    placeholder={`от ${MIN_WITHDRAWAL_STARS}`}
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white text-xs rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-zinc-600"
+                  />
+                </div>
+
                 <button
                   type="submit"
-                  className="w-full py-3 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors"
+                  disabled={isWithdrawSubmitting}
+                  className="w-full py-3 bg-white text-black font-semibold text-xs rounded-lg hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                 >
-                  Перевести {calculatedEarnings.toFixed(2)} ₽
+                  {isWithdrawSubmitting && <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />}
+                  <span>Отправить заявку на вывод</span>
                 </button>
               </form>
             )}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
   Check, 
@@ -7,13 +7,21 @@ import {
   Pause, 
   Music, 
   AlertTriangle, 
-  FileText, 
   Clock, 
   CheckCircle2, 
   XCircle,
-  Volume2
+  Volume2,
+  Coins,
+  Send,
+  RefreshCw
 } from 'lucide-react';
 import { Track } from '../types';
+import {
+  WithdrawalRequest,
+  fetchAllWithdrawalRequests,
+  markWithdrawalPaid,
+  markWithdrawalRejected,
+} from '../lib/earningsApi';
 
 interface AdminViewProps {
   tracks: Track[];
@@ -24,6 +32,12 @@ interface AdminViewProps {
   isPlaying: boolean;
 }
 
+const WITHDRAWAL_STATUS_LABELS: Record<WithdrawalRequest['status'], { label: string; className: string }> = {
+  pending: { label: 'В обработке', className: 'bg-amber-950/80 text-amber-300 border-amber-800' },
+  paid: { label: 'Выплачено', className: 'bg-emerald-950/80 text-emerald-300 border-emerald-800' },
+  rejected: { label: 'Отклонено', className: 'bg-red-950/80 text-red-300 border-red-800' },
+};
+
 export const AdminView: React.FC<AdminViewProps> = ({
   tracks,
   onApproveTrack,
@@ -32,9 +46,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
   currentTrack,
   isPlaying,
 }) => {
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'withdrawals'>('pending');
   const [rejectingTrackId, setRejectingTrackId] = useState<string | null>(null);
   const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const pendingTracks = tracks.filter(t => t.moderationStatus === 'pending');
   const approvedTracks = tracks.filter(t => t.moderationStatus === 'approved' || !t.moderationStatus);
@@ -43,6 +61,47 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const displayedTracks = 
     activeTab === 'pending' ? pendingTracks :
     activeTab === 'approved' ? approvedTracks : rejectedTracks;
+
+  const loadWithdrawals = () => {
+    setIsLoadingWithdrawals(true);
+    fetchAllWithdrawalRequests()
+      .then(setWithdrawals)
+      .finally(() => setIsLoadingWithdrawals(false));
+  };
+
+  useEffect(() => {
+    if (activeTab === 'withdrawals') {
+      loadWithdrawals();
+    }
+  }, [activeTab]);
+
+  const pendingWithdrawalsCount = withdrawals.filter(w => w.status === 'pending').length;
+
+  const handleMarkPaid = async (id: string) => {
+    setProcessingId(id);
+    try {
+      await markWithdrawalPaid(id);
+      setWithdrawals(prev => prev.map(w => w.id === id ? { ...w, status: 'paid', processed_at: new Date().toISOString() } : w));
+    } catch (err) {
+      console.error('Failed to mark withdrawal as paid:', err);
+      alert('Не удалось отметить заявку выплаченной. Попробуйте ещё раз.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleMarkRejected = async (id: string) => {
+    setProcessingId(id);
+    try {
+      await markWithdrawalRejected(id);
+      setWithdrawals(prev => prev.map(w => w.id === id ? { ...w, status: 'rejected', processed_at: new Date().toISOString() } : w));
+    } catch (err) {
+      console.error('Failed to reject withdrawal:', err);
+      alert('Не удалось отклонить заявку. Попробуйте ещё раз.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
 
   const handleOpenRejectModal = (trackId: string) => {
     setRejectingTrackId(trackId);
@@ -64,32 +123,37 @@ export const AdminView: React.FC<AdminViewProps> = ({
         <div className="space-y-1">
           <div className="inline-flex items-center space-x-2 px-2.5 py-0.5 bg-white text-black font-mono font-bold text-[10px] rounded-full uppercase">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Панель Администратора / Модерация</span>
+            <span>Панель Администратора</span>
           </div>
           <h2 className="text-2xl font-extrabold text-white tracking-tight">
-            Проверка поступающих треков
+            Модерация и выплаты
           </h2>
           <p className="text-xs text-zinc-400">
-            Прослушивайте загруженную независимыми авторами музыку и одобряйте публикации или отклоняйте с указанием причины.
+            Проверяйте загруженные треки и обрабатывайте заявки авторов на вывод звёзд.
           </p>
         </div>
 
         {/* Stats Pills */}
-        <div className="flex items-center space-x-2 shrink-0">
+        <div className="flex items-center space-x-2 shrink-0 flex-wrap gap-2">
           <span className="px-3 py-1.5 bg-amber-950/80 border border-amber-800/80 text-amber-300 font-mono text-xs rounded-lg font-bold">
             {pendingTracks.length} На проверке
           </span>
           <span className="px-3 py-1.5 bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 font-mono text-xs rounded-lg font-bold">
             {approvedTracks.length} В каталоге
           </span>
+          {pendingWithdrawalsCount > 0 && (
+            <span className="px-3 py-1.5 bg-white text-black font-mono text-xs rounded-lg font-bold">
+              {pendingWithdrawalsCount} Заявок на вывод
+            </span>
+          )}
         </div>
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex items-center space-x-2 border-b border-zinc-800 pb-2">
+      <div className="flex items-center space-x-2 border-b border-zinc-800 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab('pending')}
-          className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2 ${
+          className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2 shrink-0 ${
             activeTab === 'pending'
               ? 'bg-white text-black shadow'
               : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -101,7 +165,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
         <button
           onClick={() => setActiveTab('approved')}
-          className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2 ${
+          className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2 shrink-0 ${
             activeTab === 'approved'
               ? 'bg-white text-black shadow'
               : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -113,7 +177,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
         <button
           onClick={() => setActiveTab('rejected')}
-          className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2 ${
+          className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2 shrink-0 ${
             activeTab === 'rejected'
               ? 'bg-white text-black shadow'
               : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -122,10 +186,105 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <XCircle className="w-4 h-4" />
           <span>Отклоненные ({rejectedTracks.length})</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('withdrawals')}
+          className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-2 shrink-0 ${
+            activeTab === 'withdrawals'
+              ? 'bg-white text-black shadow'
+              : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800'
+          }`}
+        >
+          <Coins className="w-4 h-4" />
+          <span>Выплаты {pendingWithdrawalsCount > 0 && `(${pendingWithdrawalsCount})`}</span>
+        </button>
       </div>
 
-      {/* Tracks List */}
-      {displayedTracks.length === 0 ? (
+      {/* Withdrawals Tab */}
+      {activeTab === 'withdrawals' ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-zinc-400">
+              Переведите звёзды вручную со своего кошелька на указанный Telegram username, затем отметьте заявку как выплаченную.
+            </p>
+            <button
+              onClick={loadWithdrawals}
+              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors shrink-0"
+              title="Обновить"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoadingWithdrawals ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+
+          {withdrawals.length === 0 ? (
+            <div className="p-12 text-center bg-zinc-950 border border-zinc-800 rounded-2xl space-y-3">
+              <Coins className="w-10 h-10 text-zinc-600 mx-auto" />
+              <p className="text-sm font-semibold text-zinc-300">Заявок на вывод пока нет.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {withdrawals.map((w) => {
+                const status = WITHDRAWAL_STATUS_LABELS[w.status];
+                const isProcessing = processingId === w.id;
+                return (
+                  <div
+                    key={w.id}
+                    className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center space-x-2 flex-wrap">
+                        <span className="text-base font-bold text-white">{w.amount_stars.toFixed(2)} ⭐</span>
+                        <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono border rounded-full ${status.className}`}>
+                          {status.label}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400">
+                        Автор: <span className="text-white">{w.user_email}</span>
+                      </p>
+                      <a
+                        href={`https://t.me/${w.telegram_username}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center space-x-1.5 text-xs text-zinc-300 hover:text-white underline"
+                      >
+                        <Send className="w-3 h-3" />
+                        <span>@{w.telegram_username}</span>
+                      </a>
+                      <p className="text-[10px] text-zinc-500 font-mono">
+                        Заявка от {new Date(w.created_at).toLocaleString('ru-RU')}
+                      </p>
+                    </div>
+
+                    {w.status === 'pending' && (
+                      <div className="flex items-center space-x-2 shrink-0 w-full sm:w-auto justify-end">
+                        <button
+                          onClick={() => handleMarkRejected(w.id)}
+                          disabled={isProcessing}
+                          className="px-3.5 py-2 bg-zinc-900 hover:bg-red-950/80 border border-zinc-800 hover:border-red-800 text-zinc-300 hover:text-red-300 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Отклонить
+                        </button>
+                        <button
+                          onClick={() => handleMarkPaid(w.id)}
+                          disabled={isProcessing}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors shadow-md flex items-center space-x-1.5 disabled:opacity-50"
+                        >
+                          {isProcessing ? (
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Check className="w-4 h-4" />
+                          )}
+                          <span>Отметить выплаченным</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : displayedTracks.length === 0 ? (
         <div className="p-12 text-center bg-zinc-950 border border-zinc-800 rounded-2xl space-y-3">
           <Music className="w-10 h-10 text-zinc-600 mx-auto" />
           <p className="text-sm font-semibold text-zinc-300">
