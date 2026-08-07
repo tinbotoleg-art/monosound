@@ -15,40 +15,45 @@ export async function fetchMyLikedTrackIds(userId: string): Promise<string[]> {
 }
 
 export async function likeTrackRemote(userId: string, trackId: string): Promise<void> {
-  console.log('[likesApi] saving like', {
-    userId,
-    trackId
-  });
-
-  const { error } = await supabase
+  const { error: insertError } = await supabase
     .from('track_likes')
-    .insert({
-      user_id: userId,
-      track_id: trackId
-    });
+    .insert({ user_id: userId, track_id: trackId });
 
-  // 23505 = лайк уже существует, это не критичная ошибка
-  if (error && error.code !== '23505') {
-    console.error('[likesApi] likeTrackRemote failed:', error);
-    throw error;
+  // 23505 = unique_violation — трек уже лайкнут (например, двойной клик),
+  // не считаем ошибкой и всё равно досчитываем счётчик ниже.
+  if (insertError && insertError.code !== '23505') {
+    console.error('[likesApi] insert into track_likes failed:', insertError.message);
+    throw insertError;
+  }
+
+  const { error: rpcError } = await supabase.rpc('increment_track_likes', {
+    p_track_id: trackId,
+    p_delta: 1,
+  });
+  if (rpcError) {
+    console.error('[likesApi] increment_track_likes(+1) failed:', rpcError.message);
+    throw rpcError;
   }
 }
 
-
 export async function unlikeTrackRemote(userId: string, trackId: string): Promise<void> {
-  console.log('[likesApi] removing like', {
-    userId,
-    trackId
-  });
-
-  const { error } = await supabase
+  const { error: deleteError } = await supabase
     .from('track_likes')
     .delete()
     .eq('user_id', userId)
     .eq('track_id', trackId);
 
-  if (error) {
-    console.error('[likesApi] unlikeTrackRemote failed:', error);
-    throw error;
+  if (deleteError) {
+    console.error('[likesApi] delete from track_likes failed:', deleteError.message);
+    throw deleteError;
+  }
+
+  const { error: rpcError } = await supabase.rpc('increment_track_likes', {
+    p_track_id: trackId,
+    p_delta: -1,
+  });
+  if (rpcError) {
+    console.error('[likesApi] increment_track_likes(-1) failed:', rpcError.message);
+    throw rpcError;
   }
 }
