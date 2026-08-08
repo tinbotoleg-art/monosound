@@ -26,6 +26,27 @@ import {
   subscribeToMyWithdrawals,
 } from '../lib/earningsApi';
 
+/** Читает настоящую длительность (в секундах) из аудиофайла — раньше
+ * длительность просто угадывалась случайным числом при загрузке, из-за
+ * чего бегунок прогресса при воспроизведении не совпадал с треком. */
+function readAudioFileDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const probe = new Audio();
+    probe.preload = 'metadata';
+    probe.src = objectUrl;
+    probe.onloadedmetadata = () => {
+      const duration = isFinite(probe.duration) && probe.duration > 0 ? probe.duration : 210;
+      URL.revokeObjectURL(objectUrl);
+      resolve(Math.round(duration));
+    };
+    probe.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(210); // не удалось прочитать метаданные — разумный дефолт
+    };
+  });
+}
+
 interface EarnViewProps {
   currentUser: User | null;
   uploadedTracks: Track[];
@@ -165,6 +186,9 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
       const finalAudioUrl = audioFile ? await uploadAudioFile(audioFile) : undefined;
       const finalCoverUrl = coverFile ? await uploadCoverFile(coverFile) : randomCover;
+      const finalDuration = audioFile
+        ? await readAudioFileDuration(audioFile)
+        : 180 + Math.floor(Math.random() * 60); // для синтезированных треков без файла
 
       await onUploadTrack({
         title,
@@ -172,7 +196,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
         album: album || 'Сингл',
         genre,
         year,
-        duration: 180 + Math.floor(Math.random() * 60),
+        duration: finalDuration,
         coverUrl: finalCoverUrl,
         audioUrl: finalAudioUrl,
         audioPattern: !finalAudioUrl ? {

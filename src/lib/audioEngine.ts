@@ -38,6 +38,24 @@ export class AudioEngine {
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
       if (this.onEndedCb) this.onEndedCb();
     });
+
+    // ВАЖНО: реальная длительность трека — это то, что сообщает сам
+    // аудиофайл, а не то, что записано в базе (для загруженных треков
+    // это могло быть случайное/неверное число). Как только браузер
+    // прочитал метаданные файла, подменяем this.duration на настоящее
+    // значение и сразу сообщаем об этом наружу — это и чинит бегунок,
+    // который раньше мог доходить до конца раньше или позже трека.
+    const handleRealDuration = () => {
+      const real = this.audioEl.duration;
+      if (isFinite(real) && real > 0 && Math.abs(real - this.duration) > 0.5) {
+        this.duration = real;
+        if (this.onTimeUpdateCb) {
+          this.onTimeUpdateCb(this.audioEl.currentTime, this.duration);
+        }
+      }
+    };
+    this.audioEl.addEventListener('loadedmetadata', handleRealDuration);
+    this.audioEl.addEventListener('durationchange', handleRealDuration);
   }
 
   public setVolume(volume: number) {
