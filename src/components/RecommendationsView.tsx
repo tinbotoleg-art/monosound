@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, RefreshCw, Disc, Heart, BarChart3, Radio, Play, Users } from 'lucide-react';
+import { Sparkles, Play, Users } from 'lucide-react';
 import { Track, PreferenceProfile, RecommendationReason, Playlist } from '../types';
 import { getRecommendations } from '../lib/recommendationEngine';
 import { TrackCard } from './TrackCard';
@@ -42,12 +42,11 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
   const [recommendations, setRecommendations] = useState<RecommendationReason[]>([]);
   const [summaryText, setSummaryText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [moodInput, setMoodInput] = useState('');
 
-  const loadRecommendations = async (mood?: string) => {
+  const loadRecommendations = async () => {
     setIsLoading(true);
     try {
-      const res = await getRecommendations(userId, preferenceProfile, allTracks, mood);
+      const res = await getRecommendations(userId, preferenceProfile, allTracks);
       setRecommendations(res.recommendations);
       setSummaryText(res.summaryText);
     } finally {
@@ -102,34 +101,6 @@ export const RecommendationsView: React.FC<RecommendationsViewProps> = ({
               <p className="text-sm font-bold text-white mt-0.5">{preferenceProfile.history.length} прослушиваний</p>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Mood Filter Box (keyword-based, no external calls) */}
-      <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-3">
-        <label className="block text-xs font-mono uppercase text-zinc-400">
-          Уточнить подборку по настроению (по жанрам)
-        </label>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            type="text"
-            value={moodInput}
-            onChange={(e) => setMoodInput(e.target.value)}
-            placeholder="Например: Спокойное вечернее чтение, Концентрация на кодинге..."
-            className="flex-1 bg-zinc-950 border border-zinc-800 text-white text-xs rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-zinc-600"
-          />
-          <button
-            onClick={() => loadRecommendations(moodInput)}
-            disabled={isLoading}
-            className="inline-flex items-center justify-center space-x-2 px-4 py-2.5 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-50 shrink-0"
-          >
-            {isLoading ? (
-              <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <RefreshCw className="w-3.5 h-3.5" />
-            )}
-            <span>Сформировать микс</span>
-          </button>
         </div>
       </div>
 

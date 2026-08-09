@@ -13,7 +13,8 @@ import {
   Volume2,
   Clock,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Lock
 } from 'lucide-react';
 import { Track, Genre, User } from '../types';
 import { uploadAudioFile, uploadCoverFile } from '../lib/tracksApi';
@@ -52,6 +53,7 @@ interface EarnViewProps {
   uploadedTracks: Track[];
   onUploadTrack: (newTrack: Omit<Track, 'id' | 'playCount'>) => Promise<void>;
   onOpenAuth: () => void;
+  onNavigateToSubscribe: () => void;
   onPlayTrack: (track: Track) => void;
   currentTrack: Track | null;
   isPlaying: boolean;
@@ -97,6 +99,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
   uploadedTracks,
   onUploadTrack,
   onOpenAuth,
+  onNavigateToSubscribe,
   onPlayTrack,
   currentTrack,
   isPlaying,
@@ -129,6 +132,9 @@ export const EarnView: React.FC<EarnViewProps> = ({
   const myTracks = uploadedTracks.filter(
     t => t.uploadedBy === currentUser?.email || t.uploadedBy === currentUser?.id
   );
+
+  // Загрузка своей музыки — только по подписке.
+  const canUpload = !!currentUser && currentUser.isSubscribed;
 
   const totalPlaysOnMyTracks = myTracks.reduce((acc, t) => acc + (t.playCount || 0), 0);
   const totalEarnedStars = totalPlaysOnMyTracks * EARNINGS_PER_PLAY_STARS;
@@ -330,6 +336,23 @@ export const EarnView: React.FC<EarnViewProps> = ({
         </div>
       )}
 
+      {currentUser && !currentUser.isSubscribed && (
+        <div className="p-4 bg-zinc-900/80 border border-zinc-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <Lock className="w-5 h-5 text-white shrink-0" />
+            <p className="text-xs text-zinc-300">
+              Загрузка своей музыки доступна по подписке MonoSound Премиум — оформите за 50 ⭐, чтобы публиковать треки и получать выплаты.
+            </p>
+          </div>
+          <button
+            onClick={onNavigateToSubscribe}
+            className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-lg shrink-0 transition-colors"
+          >
+            Оформить за 50 ⭐
+          </button>
+        </div>
+      )}
+
       {/* Main Grid: Upload Form & Royalty Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Track Upload Form (2 cols) */}
@@ -352,12 +375,35 @@ export const EarnView: React.FC<EarnViewProps> = ({
               </div>
             )}
 
-            {submitError && (
-              <div className="p-4 bg-red-950/50 border border-red-800 text-red-200 text-xs rounded-lg flex items-center space-x-3">
-                <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-                <span>{submitError}</span>
+            {!canUpload ? (
+              <div className="p-8 text-center border border-dashed border-zinc-800 rounded-xl space-y-4">
+                <div className="w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto">
+                  <Lock className="w-6 h-6 text-white" />
+                </div>
+                <div className="space-y-1.5 max-w-sm mx-auto">
+                  <p className="text-sm font-bold text-white">Загрузка доступна по подписке</p>
+                  <p className="text-xs text-zinc-400">
+                    {!currentUser
+                      ? 'Авторизуйтесь и оформите подписку MonoSound Премиум (50 ⭐/мес), чтобы публиковать свои треки и получать выплаты.'
+                      : 'Оформите подписку MonoSound Премиум (50 ⭐/мес), чтобы публиковать свои треки и получать выплаты.'}
+                  </p>
+                </div>
+                <button
+                  onClick={currentUser ? onNavigateToSubscribe : onOpenAuth}
+                  className="inline-flex items-center space-x-2 px-5 py-2.5 bg-white text-black hover:bg-zinc-200 text-xs font-semibold rounded-lg transition-colors shadow-md"
+                >
+                  <Sparkles className="w-4 h-4 fill-black" />
+                  <span>{currentUser ? 'Оформить за 50 ⭐' : 'Войти в аккаунт'}</span>
+                </button>
               </div>
-            )}
+            ) : (
+              <>
+                {submitError && (
+                  <div className="p-4 bg-red-950/50 border border-red-800 text-red-200 text-xs rounded-lg flex items-center space-x-3">
+                    <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                    <span>{submitError}</span>
+                  </div>
+                )}
 
             <form onSubmit={handleSubmitTrack} className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -496,6 +542,8 @@ export const EarnView: React.FC<EarnViewProps> = ({
                 )}
               </button>
             </form>
+              </>
+            )}
           </div>
         </div>
 

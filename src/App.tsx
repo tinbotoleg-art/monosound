@@ -976,6 +976,7 @@ export default function App() {
                 uploadedTracks={tracks}
                 onUploadTrack={handleUploadTrack}
                 onOpenAuth={() => setIsAuthModalOpen(true)}
+                onNavigateToSubscribe={goToSubscriptionFlow}
                 onPlayTrack={playTrack}
                 currentTrack={currentTrack}
                 isPlaying={isPlaying}
