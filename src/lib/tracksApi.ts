@@ -56,7 +56,13 @@ function mapRowToTrack(row: TrackRow): Track {
   };
 }
 
-/** Загружает список треков, видимых текущей сессии (см. RLS выше). */
+/**
+ * Загружает список треков, видимых текущей сессии (см. RLS выше).
+ * Бросает исключение при сетевой ошибке — раньше здесь тихо
+ * возвращался пустой массив, из-за чего оффлайн (или любой сбой сети)
+ * выглядел как "треков вообще нет", вместо того чтобы дать вызывающему
+ * коду откатиться на последний закэшированный список (см. App.tsx).
+ */
 export async function fetchTracks(): Promise<Track[]> {
   const { data, error } = await supabase
     .from('tracks')
@@ -65,7 +71,7 @@ export async function fetchTracks(): Promise<Track[]> {
 
   if (error) {
     console.error('[tracksApi] fetchTracks failed:', error.message);
-    return [];
+    throw error;
   }
   return (data as TrackRow[]).map(mapRowToTrack);
 }

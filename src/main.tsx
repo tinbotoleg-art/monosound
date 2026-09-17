@@ -1,5 +1,6 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import { registerSW } from 'virtual:pwa-register';
 import App from './App.tsx';
 import './index.css';
 
@@ -9,12 +10,8 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Регистрируем service worker — без него Chrome на Android не покажет
-// промпт установки ("Скачать" в меню приложения).
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration failed:', err);
-    });
-  });
-}
+// Регистрирует автоматически сгенерированный (и правильно прекэшированный)
+// service worker — см. vite.config.ts. Это и есть офлайн-оболочка
+// приложения: после первого захода онлайн сайт целиком грузится из кэша
+// даже без сети.
+registerSW({ immediate: true });

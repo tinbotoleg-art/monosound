@@ -16,6 +16,7 @@ import { globalAudioEngine } from './lib/audioEngine';
 import { syncUserProfile } from './lib/recommendationEngine';
 import { supabase } from './lib/supabaseClient';
 import { fetchTracks, submitTrack, approveTrackRemote, rejectTrackRemote } from './lib/tracksApi';
+import { saveTracksCache, loadTracksCache } from './lib/offlineCache';
 import { fetchProfile, subscribeToProfileChanges } from './lib/subscription';
 import { fetchMyLikedTrackIds, likeTrackRemote, unlikeTrackRemote } from './lib/likesApi';
 import { incrementTrackPlays } from './lib/earningsApi';
@@ -230,18 +231,32 @@ export default function App() {
   // сбрасывались при каждой пересборке списка (Supabase не знает о лайках
   // конкретного пользователя — likesCount это общий счётчик, а не флаг
   // "лайкнул ли Я"). Восстанавливаем их из preferenceProfile.
+  //
+  // ОФЛАЙН: если fetchTracks() падает (нет сети), раньше список треков
+  // становился пустым. Теперь в этом случае используется последний
+  // успешно загруженный каталог из localStorage (см. lib/offlineCache.ts).
+  // А треки, реально скачанные для офлайна (IndexedDB), всегда попадают
+  // в список independent от того, есть каталог или нет — иначе "сохранённые
+  // треки" были бы невозможно найти именно тогда, когда они нужнее всего.
   useEffect(() => {
     if (isAuthLoading) return;
     let cancelled = false;
 
     async function loadAndMergeTracks() {
-      const [remoteTracks, downloadedRecords] = await Promise.all([
-        fetchTracks(),
-        getDownloadedTracks().catch((err) => {
-          console.warn('IndexedDB load warning:', err);
-          return [];
-        }),
-      ]);
+      const downloadedRecords = await getDownloadedTracks().catch((err) => {
+        console.warn('IndexedDB load warning:', err);
+        return [];
+      });
+      if (cancelled) return;
+
+      let baseTracks: Track[];
+      try {
+        baseTracks = await fetchTracks();
+        saveTracksCache(baseTracks); // обновляем офлайн-кэш при удачном запросе
+      } catch (err) {
+        console.warn('[App] fetchTracks failed — работаем офлайн, берём кэш:', err);
+        baseTracks = loadTracksCache();
+      }
       if (cancelled) return;
 
       const downloadedById = new Map(downloadedRecords.map((r) => [r.track.id, r]));
@@ -249,10 +264,15 @@ export default function App() {
       const likedSet = new Set(likedTrackIds);
       const dislikedSet = new Set(dislikedTrackIds);
 
-      setTracks(() => {
-        const merged = remoteTracks;
-      
-        return merged.map((t) => {
+      // Гарантируем, что скачанные для офлайна треки видны, даже если их
+      // почему-то нет в baseTracks (пустой/устаревший кэш и т.п.).
+      const byId = new Map(baseTracks.map((t) => [t.id, t]));
+      downloadedRecords.forEach((r) => {
+        if (!byId.has(r.track.id)) byId.set(r.track.id, r.track);
+      });
+
+      setTracks(
+        Array.from(byId.values()).map((t) => {
           const record = downloadedById.get(t.id);
           return {
             ...t,
@@ -261,8 +281,8 @@ export default function App() {
             isLiked: likedSet.has(t.id),
             isDisliked: dislikedSet.has(t.id),
           };
-        });
-      });
+        })
+      );
     }
 
     loadAndMergeTracks();
